@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Segregated Lending Protocol</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,system-ui,'Segoe UI',sans-serif;background:#fff;color:#1d1d1f;line-height:1.75;padding:48px 24px;font-size:15px;-webkit-font-smoothing:antialiased}
+.page{max-width:600px;margin:0 auto}
+h1{font-size:22px;font-weight:700;margin-bottom:2px}
+.meta{font-size:13px;color:#86868b;margin-bottom:32px}
+h2{font-size:17px;font-weight:700;margin:36px 0 10px;padding-top:14px;border-top:2px solid #e5e5e7}
+h3{font-size:15px;font-weight:700;margin:20px 0 6px}
+p{margin-bottom:10px}
+code{font-family:'SF Mono',Menlo,monospace;font-size:13px;background:#f5f5f7;padding:1px 5px;border-radius:3px}
+.flow{background:#f5f5f7;border-radius:8px;padding:20px;margin:16px 0;overflow-x:auto}
+.note{border-left:3px solid #0071e3;background:#f0f7ff;padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0;font-size:14px}
+.note-green{border-left-color:#34c759;background:#f0faf3}
+.note-amber{border-left-color:#f59e0b;background:#fffbf0}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{text-align:left;font-weight:600;padding:7px 8px;border-bottom:2px solid #e5e5e7;font-size:12px;color:#86868b;text-transform:uppercase;letter-spacing:.03em}
+td{padding:7px 8px;border-bottom:1px solid #f0f0f2;vertical-align:top;line-height:1.5}
+.tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:3px}
+.t-g{background:#d1f2db;color:#1a7a3a}.t-b{background:#d6e8ff;color:#1a4a7a}.t-y{background:#fff3d6;color:#7a5a1a}.t-r{background:#ffd9d6;color:#c0392b}
+details{margin:8px 0;border:1px solid #e5e5e7;border-radius:6px;overflow:hidden}
+details summary{padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600;background:#f5f5f7;list-style:none;display:flex;align-items:center;gap:8px}
+details summary::before{content:'▶';font-size:9px;transition:transform .2s}
+details[open] summary::before{transform:rotate(90deg)}
+details .inner{padding:12px 14px;font-size:14px}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:2px;margin:12px 0;font-size:13px;border:1px solid #e5e5e7;border-radius:6px;overflow:hidden}
+.compare div{padding:8px 10px;background:#f5f5f7}
+.compare div:nth-child(odd){background:#fff}
+.compare .ch{font-weight:600;color:#86868b;font-size:11px;text-transform:uppercase;background:#e5e5e7 !important}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>Segregated Institutional Lending Protocol</h1>
+<p class="meta">P2P Staking (Cayman Islands) · Working document v0.7 · Confidential</p>
+
+<!-- ======================================= -->
+<h2>1. What we're building</h2>
+
+<p>Crypto-версия Tri-Party Repo инфраструктуры.</p>
+
+<p>В TradFi банк, которому нужен cash, не продаёт свои облигации — он отдаёт их как collateral через BNY Mellon (tri-party agent), получает cash на время, и через оговоренный срок забирает обратно. BNY Mellon не берёт credit risk — только обеспечивает custody, settlement и valuation. Зарабатывает на fees. Рынок — $4+ триллиона в день.</p>
+
+<p>Мы делаем то же самое для crypto: институционал не хочет продавать BTC/ETH — он отдаёт их как collateral через наш протокол, получает USDC, возвращает с процентами. Активы никогда не покидают custody.</p>
+
+<div class="compare">
+<div class="ch">TradFi Repo</div><div class="ch">Наш протокол</div>
+<div>BNY Mellon — tri-party agent</div><div>AMINA Bank — broker + curator + liquidator</div>
+<div>Clearing bank infrastructure</div><div>Smart contract (Ethereum) — escrow + settlement</div>
+<div>Custody collateral, settlement, valuation</div><div>Lock collateral, settlement routing, LTV enforcement</div>
+<div>GMRA — master agreement (1 раз)</div><div>Click-through terms (1 раз при онбординге)</div>
+<div>Trade confirmation per deal</div><div>On-chain record per deal</div>
+<div>Agent не берёт credit risk</div><div>Ни мы, ни AMINA не берём credit risk</div>
+<div>Fees за infrastructure</div><div>40 bps total (20 infra + 20 broker)</div>
+<div>Онбординг: недели/месяцы</div><div>Дни (AMINA KYB + custody tokenization)</div>
+<div>Только US Treasuries / HG bonds</div><div>BTC, ETH, USDC, stablecoins, RWA</div>
+</div>
+
+<div class="note">
+<strong>Почему раньше не сделали:</strong> все предыдущие crypto lending platforms (Genesis, Celsius, BlockFi) работали как counterparty — брали deposits, выдавали loans от своего имени, обанкротились ($50B+ потерь). Инфраструктура для другой модели не существовала: зрелый institutional custody (2023-24), tokenization engines (2024-25), institutional counterparties (post-ETF 2024). Сейчас все компоненты на месте, но продукта нет.
+</div>
+
+<!-- ======================================= -->
+<h2>2. Как работает</h2>
+
+<p><strong>Lender</strong> — USDC на custody. Кастодиан минтит supply token. Lender депозитит в pool. Earns yield.</p>
+
+<p><strong>Borrower</strong> — реальные активы (BTC/ETH/USDC) на custody. Кастодиан минтит collateral token. Borrower постит в pool. Берёт supply tokens. Redemption у кастодиана lender'а за реальные USDC.</p>
+
+<p><strong>P2P Staking</strong> — деплоит контракты, предоставляет UI. Берёт 20 bps. Никогда не касается активов, не принимает risk decisions.</p>
+
+<p><strong>AMINA Bank (Broker + Curator + Liquidator)</strong> — matching под их Securities Dealer лицензией, ставит LTV/rates, мониторит позиции, ликвидирует при дефолте. Берёт 20 bps. Регулируемый банк (FINMA + MiCA), имеет trading desk, legal team, custody, и partnership с Tokeny для токенизации.</p>
+
+<div class="flow">
+<svg width="100%" viewBox="0 0 560 380" fill="none" xmlns="http://www.w3.org/2000/svg">
+<style>.n{font-family:-apple-system,system-ui,sans-serif;fill:#1d1d1f;font-size:11px}.ns{font-family:-apple-system,system-ui,sans-serif;fill:#86868b;font-size:10px}</style>
+<defs><marker id="a" viewBox="0 0 8 6" refX="7" refY="3" markerWidth="7" markerHeight="5" orient="auto"><path d="M0 0L7 3L0 6" fill="#86868b"/></marker></defs>
+
+<!-- Lanes -->
+<rect x="0" y="0" width="105" height="310" rx="8" fill="#f0faf3" stroke="#d1f2db"/>
+<rect x="112" y="0" width="110" height="310" rx="8" fill="#f0f7ff" stroke="#d6e8ff"/>
+<rect x="229" y="0" width="100" height="310" rx="8" fill="#f3f0ff" stroke="#ede5ff"/>
+<rect x="336" y="0" width="105" height="310" rx="8" fill="#fff5f5" stroke="#ffd9d6"/>
+<rect x="448" y="0" width="110" height="310" rx="8" fill="#f0f7ff" stroke="#d6e8ff"/>
+
+<!-- Headers -->
+<text x="52" y="16" text-anchor="middle" class="n" style="font-weight:700;fill:#15803d">LENDER</text>
+<text x="52" y="28" text-anchor="middle" class="ns">Даёт USDC</text>
+<text x="167" y="16" text-anchor="middle" class="n" style="font-weight:700;fill:#1a4a7a">CUSTODY B</text>
+<text x="167" y="28" text-anchor="middle" class="ns">Минтит токены</text>
+<text x="279" y="16" text-anchor="middle" class="n" style="font-weight:700;fill:#5b21b6">POOL</text>
+<text x="279" y="28" text-anchor="middle" class="ns">Escrow</text>
+<text x="388" y="16" text-anchor="middle" class="n" style="font-weight:700;fill:#c0392b">BORROWER</text>
+<text x="388" y="28" text-anchor="middle" class="ns">Берёт USDC</text>
+<text x="503" y="16" text-anchor="middle" class="n" style="font-weight:700;fill:#1a4a7a">CUSTODY A</text>
+<text x="503" y="28" text-anchor="middle" class="ns">Collateral</text>
+
+<!-- Flow -->
+<rect x="8" y="42" width="90" height="26" rx="5" fill="#d1f2db" stroke="#22c55e" stroke-width="1.2"/>
+<text x="53" y="59" text-anchor="middle" class="n" style="font-weight:600">① USDC</text>
+<path d="M98 55 L120 55" stroke="#86868b" stroke-width="1" marker-end="url(#a)"/>
+<rect x="120" y="42" width="95" height="26" rx="5" fill="#d6e8ff" stroke="#4a9eed" stroke-width="1.2"/>
+<text x="167" y="59" text-anchor="middle" class="n">② На custody</text>
+
+<path d="M167 68 L167 82" stroke="#8b5cf6" stroke-width="1" marker-end="url(#a)"/>
+<rect x="120" y="85" width="95" height="26" rx="5" fill="#ede5ff" stroke="#8b5cf6" stroke-width="1.2"/>
+<text x="167" y="102" text-anchor="middle" class="n">③ Mint Token B</text>
+<path d="M215 98 L237 98" stroke="#8b5cf6" stroke-width="1" marker-end="url(#a)"/>
+<rect x="237" y="85" width="85" height="26" rx="5" fill="#ede5ff" stroke="#8b5cf6" stroke-width="1.2"/>
+<text x="279" y="102" text-anchor="middle" class="n">④ В pool</text>
+
+<rect x="456" y="42" width="95" height="26" rx="5" fill="#d6e8ff" stroke="#4a9eed" stroke-width="1.2"/>
+<text x="503" y="59" text-anchor="middle" class="n">BTC/ETH</text>
+<path d="M503 68 L503 82" stroke="#4a9eed" stroke-width="1" marker-end="url(#a)"/>
+<rect x="456" y="85" width="95" height="26" rx="5" fill="#ede5ff" stroke="#8b5cf6" stroke-width="1.2"/>
+<text x="503" y="102" text-anchor="middle" class="n">Mint Token A</text>
+<path d="M456 98 L441 98" stroke="#ef4444" stroke-width="1" marker-end="url(#a)"/>
+
+<rect x="343" y="82" width="92" height="34" rx="5" fill="#ffd9d6" stroke="#ef4444" stroke-width="1.2"/>
+<text x="389" y="99" text-anchor="middle" class="n" style="font-weight:600">⑤ Collateral</text>
+<text x="389" y="110" text-anchor="middle" class="ns">Token A</text>
+<path d="M343 100 L322 100" stroke="#ef4444" stroke-width="1" marker-end="url(#a)"/>
+
+<path d="M279 111 L279 128" stroke="#8b5cf6" stroke-width="1" marker-end="url(#a)"/>
+<rect x="237" y="132" width="85" height="26" rx="5" fill="#ede5ff" stroke="#8b5cf6" stroke-width="1.2"/>
+<text x="279" y="149" text-anchor="middle" class="n">⑥ Locked</text>
+<path d="M322 145 L340 145" stroke="#8b5cf6" stroke-width="1" marker-end="url(#a)" stroke-dasharray="3 3"/>
+<rect x="340" y="132" width="98" height="26" rx="5" fill="#faebdd" stroke="#f59e0b" stroke-width="1.2"/>
+<text x="389" y="149" text-anchor="middle" class="n">⑦ Token B</text>
+
+<path d="M340 152 L220 180" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="120" y="180" width="200" height="28" rx="5" fill="#faebdd" stroke="#f59e0b" stroke-width="1.5"/>
+<text x="220" y="198" text-anchor="middle" class="n" style="font-weight:600">⑧ Redeem → real USDC</text>
+
+<path d="M220 208 L220 222" stroke="#22c55e" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="120" y="226" width="200" height="26" rx="5" fill="#d1f2db" stroke="#22c55e" stroke-width="1.5"/>
+<text x="220" y="243" text-anchor="middle" class="n">⑨ Return + interest → collateral back</text>
+
+<path d="M220 252 L220 264" stroke="#ef4444" stroke-width="1" marker-end="url(#a)" stroke-dasharray="3 3"/>
+<text x="232" y="262" class="ns" style="fill:#c0392b">default</text>
+<rect x="120" y="268" width="200" height="26" rx="5" fill="#ffd9d6" stroke="#ef4444" stroke-width="1.2"/>
+<text x="220" y="285" text-anchor="middle" class="n" style="fill:#c0392b">AMINA liquidates → redeems at custody</text>
+
+<!-- Legend -->
+<rect x="0" y="322" width="558" height="48" rx="6" fill="#f5f5f7" stroke="#e5e5e7"/>
+<text x="12" y="340" class="ns"><tspan style="font-weight:600">P2P Staking:</tspan> 20 bps — infrastructure, UI, contracts. Never touches assets.</text>
+<text x="12" y="355" class="ns"><tspan style="font-weight:600">AMINA Bank:</tspan> 20 bps — LTV, rates, monitoring, liquidation, legal. Regulated (FINMA + MiCA).</text>
+<text x="12" y="370" class="ns">Assets never leave custody. Custody KYC = identity layer.</text>
+</svg>
+</div>
+
+<!-- ======================================= -->
+<h2>3. User journey</h2>
+
+<h3>Lender (хочет заработать yield)</h3>
+
+<p><strong>①</strong> Заполняет KYB на платформе (P2P собирает данные → AMINA одобряет) + имеет custody account с токенизированными активами.</p>
+<p><strong>②</strong> Заходит в протокол, подключает custody wallet. Видит dashboard: <em>средняя ставка по рынку — 7.2% на USDC, доступная ликвидность для займов — $24M.</em></p>
+<p><strong>③</strong> Вводит: "Хочу дать 2M USDC, 3 месяца."</p>
+<p><strong>④</strong> Matching engine находит borrowers. Может быть один на всю сумму, может быть несколько. Лендер видит: <em>"Matched: 3 deals, avg rate 7.4%, all asset-backed, AMINA-verified."</em></p>
+<p><strong>⑤</strong> Подписывает batch одной транзакцией. На его стороне это одна позиция на 2M, внутри — несколько bilateral deals.</p>
+<p><strong>⑥</strong> Dashboard показывает: active position, yield accruing, time to maturity. Done.</p>
+
+<h3>Borrower (нужна ликвидность)</h3>
+
+<p><strong>①</strong> Заполняет KYB на платформе (P2P собирает данные → AMINA одобряет) + имеет custody account с collateral assets токенизированными.</p>
+<p><strong>②</strong> Заходит в протокол. Видит: <em>средняя ставка по займам — 7.6%, доступная ликвидность — $18M USDC.</em></p>
+<p><strong>③</strong> Вводит: "Хочу занять 5M USDC, даю ETH collateral, 3 месяца."</p>
+<p><strong>④</strong> Engine показывает: <em>"Rate: 7.6%. Required collateral: 5,880 ETH (LTV 85%). Matched with available lenders."</em></p>
+<p><strong>⑤</strong> Подписывает. Collateral locks, supply tokens released, settlement через custody.</p>
+<p><strong>⑥</strong> Получает USDC. Dashboard: active loan, interest accruing, maturity date.</p>
+
+<div class="note">
+<strong>Что юзер не видит и не должен видеть:</strong> конкретных counterparties (privacy), внутреннюю структуру matching (сколько bilateral deals), custody operations (mint/burn tokens). Для него это одна позиция, одна ставка, один dashboard.
+</div>
+
+<!-- ======================================= -->
+<h2>4. Matching mechanics</h2>
+
+<p>Lenders и borrowers не общаются друг с другом. Они видят <strong>агрегированную ставку</strong> и доступную ликвидность. Matching engine разбивает крупные ордера на bilateral deals автоматически.</p>
+
+<table>
+<tr><th>Что видит юзер</th><th>Что происходит внутри</th></tr>
+<tr><td>"Lend 2M USDC at ~7.4%"</td><td>Engine создаёт 3 bilateral deals: 800K + 700K + 500K с разными borrowers. Каждый deal — отдельный escrow on-chain.</td></tr>
+<tr><td>"Borrow 5M USDC"</td><td>Engine матчит с 4 lenders. Borrower подписывает batch. Collateral распределяется пропорционально.</td></tr>
+<tr><td>"My position: 2M USDC, 7.4%"</td><td>Dashboard агрегирует все underlying deals в одну позицию.</td></tr>
+</table>
+
+<p><strong>Rate discovery:</strong> AMINA устанавливает базовую ставку на основе market conditions. Юзеры видят эту ставку как "текущий рейт". Нет торгов, нет аукциона — фиксированная ставка на период. Раз в 3 месяца пересмотр.</p>
+
+<p><strong>Очерёдность matching:</strong> first-come first-served. Крупные ордера заполняются по мере поступления ликвидности с другой стороны. Частичное заполнение possible — юзер видит "1.2M из 2M filled, остальное pending."</p>
+
+<div class="note">
+<strong>Регуляторный статус matching:</strong> matching engine технически наш, но юридически работает под Securities Dealer лицензией AMINA (FINMA). AMINA — licensed broker, мы — technology platform powering their brokerage. Юзеры — клиенты AMINA, проходят их KYB. Это снимает вопрос "нужна ли нам брокерская лицензия" полностью.
+</div>
+
+<div class="note-green note">
+<strong>Почему bilateral, а не pool:</strong> каждый deal — отдельный escrow с конкретным collateral. При дефолте одного borrower — затронут только его lenders, не весь pool. Изоляция риска. Но для юзера это выглядит как один простой продукт.
+</div>
+
+<!-- ======================================= -->
+<h2>5. Privacy</h2>
+
+<p>Blockchain pseudonymous by default — custody wallets не подписаны публично. Mapping address → entity знает только custody provider. Lender не знает кто borrower и наоборот — AMINA знает обе стороны, но не раскрывает. Дополнительные privacy features (fresh addresses, off-chain parameters) — добавим по запросу клиентов.</p>
+
+<!-- ======================================= -->
+<h2>6. Роли и ответственность</h2>
+
+<table>
+<tr><th>Role</th><th>Entity</th><th>Does</th><th>Revenue</th></tr>
+<tr>
+<td><strong>Technology provider</strong></td>
+<td>P2P Staking</td>
+<td>Builds and operates platform: smart contracts, matching engine, UI, settlement routing. Collects KYB data (onboarding UI, document upload). Never touches assets. No financial decisions.</td>
+<td>20 bps</td>
+</tr>
+<tr>
+<td><strong>Broker + Curator + Liquidator</strong></td>
+<td>AMINA Bank</td>
+<td>Licensed broker (FINMA Securities Dealer): matching runs under their license. Sets LTV/rates. Conducts KYB screening and approval (under FINMA license). Monitors positions. Liquidates. Redeems collateral at custody. Custody + tokenization via Tokeny.</td>
+<td>20 bps + liquidation bonus</td>
+</tr>
+<tr>
+<td><strong>Supply Token issuer</strong></td>
+<td>Custodian (AMINA / Fireblocks / etc.)</td>
+<td>Holds assets. Mints supply tokens via native engine. KYC/KYB = identity layer.</td>
+<td>Existing custody fee</td>
+</tr>
+</table>
+
+<div class="note-green note">
+<strong>Collateral:</strong> asset-backed only. Реальные активы (BTC, ETH, USDC, stablecoins) лежат на custody. Кастодиан минтит Supply Token 1:1. LTV 80-90%. При дефолте AMINA ликвидирует → redeems у кастодиана → получает реальные активы. Instant recovery, без суда.
+</div>
+
+<!-- ======================================= -->
+<h2>7. AMINA Bank как партнёр</h2>
+
+<p>AMINA (ранее SEBA Bank) — Swiss-regulated crypto bank. <strong>Banking + Securities Dealer License</strong> от FINMA (2019). MiCA через Австрию. SFC license Hong Kong. FSRA Abu Dhabi. Custody, trading, brokerage, tokenization (через Tokeny, ERC-3643). Первый регулируемый банк listing sponsor на 21X (EU DLT trading venue). Lending book — zero defaults за 5 лет.</p>
+
+<p><strong>Почему AMINA закрывает все regulatory вопросы:</strong></p>
+
+<table>
+<tr><th>Что нужно</th><th>Лицензия AMINA</th></tr>
+<tr><td>Matching lenders с borrowers</td><td>Securities Dealer (FINMA) — brokerage license</td></tr>
+<tr><td>KYB / counterparty verification</td><td>P2P Staking collects data → AMINA screens and approves (Banking license, FINMA)</td></tr>
+<tr><td>Risk parameters (LTV, rates)</td><td>Banking license — credit risk management</td></tr>
+<tr><td>Liquidation + asset recovery</td><td>Banking + trading desk — execution capability</td></tr>
+<tr><td>Custody + tokenization</td><td>Banking license + Tokeny partnership</td></tr>
+<tr><td>EU access</td><td>MiCA license (Austria)</td></tr>
+<tr><td>Asia access</td><td>SFC (Hong Kong) + FSRA (Abu Dhabi)</td></tr>
+</table>
+
+<div class="note-amber note">
+<strong>Глобальный охват через AMINA.</strong> EU: FINMA + MiCA (Австрия). Asia: SFC (Hong Kong) + FSRA (Abu Dhabi). US: institutional clients через SEC Rule 15a-6 — chaperoning arrangement с US registered broker-dealer (стандартная практика для иностранных банков, работающих с US institutions).
+</div>
+
+<!-- ======================================= -->
+<h2>8. Architecture</h2>
+
+<p>Три слоя: off-chain (matching engine + UI + AMINA integration), on-chain (smart contracts на Ethereum mainnet), custody (токенизация + settlement).</p>
+
+<h3>Off-chain layer (наше)</h3>
+
+<table>
+<tr><th>Component</th><th>What it does</th></tr>
+<tr><td><strong>Matching engine</strong></td><td>Принимает ордера от lenders и borrowers. Разбивает крупные ордера на bilateral deals. First-come first-served. Partial fills. Агрегирует позиции для UI. <em>Юридически — под Securities Dealer лицензией AMINA.</em></td></tr>
+<tr><td><strong>Rate engine</strong></td><td>Получает базовую ставку от AMINA. Рассчитывает final rate для каждого deal (base + spread). Показывает юзерам агрегированную ставку.</td></tr>
+<tr><td><strong>Order book</strong></td><td>Хранит pending ордера (lend/borrow) до заполнения. Off-chain — counterparties не видят друг друга, видят только aggregate liquidity.</td></tr>
+<tr><td><strong>Dashboard / UI</strong></td><td>Lender и borrower interface. Portfolio view (агрегированные позиции), rate display, order entry, batch signing, maturity tracking.</td></tr>
+<tr><td><strong>Deal parameter storage</strong></td><td>Deal terms (rate, maturity, collateral). Доступно сторонам + AMINA.</td></tr>
+<tr><td><strong>AMINA integration</strong></td><td>API для: получения базовых ставок, LTV параметров, liquidation triggers, KYB verification status. AMINA мониторит позиции через этот interface.</td></tr>
+<tr><td><strong>Notification service</strong></td><td>Alerts: order filled, maturity approaching, collateral warning (от AMINA), liquidation event.</td></tr>
+</table>
+
+<h3>On-chain layer — Ethereum mainnet (наше)</h3>
+
+<table>
+<tr><th>Contract</th><th>What it does</th></tr>
+<tr><td><code>IssuerRegistry</code></td><td>Whitelist кастодианов и accepted supply tokens. Governance: наш multisig.</td></tr>
+<tr><td><code>LendingPool</code></td><td>Core escrow: deposit supply tokens, lock collateral, release on repay, transfer on liquidation. Каждый bilateral deal = отдельная позиция.</td></tr>
+<tr><td><code>CollateralManager</code></td><td>LTV per issuer. Параметры записываются AMINA через privileged role. Health factor calculation.</td></tr>
+<tr><td><code>SettlementRouter</code></td><td>Emit events для off-chain custody settlement (deposit, withdrawal, redemption).</td></tr>
+</table>
+
+<p>~1,000-1,500 строк Solidity. Ethereum mainnet. On-chain = execution + settlement layer. Вся логика matching и rate discovery — off-chain.</p>
+
+<h3>Custody layer (не наше)</h3>
+
+<table>
+<tr><th>Component</th><th>Who</th><th>What</th></tr>
+<tr><td>Asset custody</td><td>AMINA / Fireblocks / BitGo / etc.</td><td>Hold assets. Segregated accounts. KYC/KYB = identity layer.</td></tr>
+<tr><td>Tokenization</td><td>Custody provider (Tokeny / Fireblocks engine)</td><td>Mint/burn supply tokens. 1:1 backed. Attestation.</td></tr>
+<tr><td>Settlement</td><td>Custody provider</td><td>Process redemptions (supply token → real USDC). Execute transfers between custody accounts.</td></tr>
+</table>
+
+<div class="note">
+<strong>Разделение ответственности:</strong> мы строим matching engine + UI + smart contracts. AMINA ставит параметры и ликвидирует. Кастодианы держат активы и минтят токены. Три независимых слоя, каждый со своей зоной ответственности.
+</div>
+
+<!-- ======================================= -->
+<h2>9. Default & liquidation</h2>
+
+<p>Collateral = реальные активы на custody. AMINA мониторит позиции и ликвидирует:</p>
+
+<table>
+<tr><th>Stage</th><th>What happens</th></tr>
+<tr><td>Warning (85%+ utilization)</td><td>AMINA уведомляет borrower. 48 часов добавить collateral.</td></tr>
+<tr><td>Partial liquidation (90%+)</td><td>AMINA ликвидирует часть позиции — достаточно чтобы вернуть в safe zone.</td></tr>
+<tr><td>Full liquidation (95%+ or maturity)</td><td>AMINA выплачивает долг lender'у, получает supply tokens, redeems у кастодиана за реальные активы.</td></tr>
+</table>
+
+<p>Recovery моментальный — supply token = право получить активы у кастодиана. Нет суда, нет арбитража, нет длинного процесса.</p>
+
+<!-- ======================================= -->
+<h2>10. Почему у нас нет рисков</h2>
+
+<div class="compare">
+<div class="ch">Риск</div><div class="ch">Наша exposure</div>
+<div>Дефолт заёмщика</div><div>None. AMINA ликвидирует, redeems collateral at custody.</div>
+<div>Неправильные LTV/rates</div><div>None. AMINA ставит параметры, AMINA несёт ответственность.</div>
+<div>Identity fraud</div><div>None. P2P collects data, AMINA screens (FINMA-regulated), custody KYC.</div>
+<div>Smart contract bug</div><div>Reputational. Митигируется аудитом + bug bounty.</div>
+<div>Регуляторная переклассификация</div><div>Low. Matching под лицензией AMINA. Мы — tech provider, no financial decisions, no asset custody.</div>
+</div>
+
+<p>BNY Mellon в tri-party repo работает точно так же — infrastructure без credit risk. Все регулируемые функции (brokerage, custody, risk management) — под лицензиями AMINA.</p>
+
+<!-- ======================================= -->
+<h2>11. Legal setup</h2>
+
+<p><strong>Entity:</strong> P2P Staking (Cayman Islands, existing). Technology provider.</p>
+
+<p><strong>Documentation:</strong> click-through terms at onboarding. Покрывают: token definitions, platform not liable, auto-liquidation rules, electronic records consent. Лёгкий документ, не full legal framework. Юзеры — клиенты AMINA, AMINA покрывает regulatory compliance через свои лицензии.</p>
+
+<p><strong>Identity / онбординг:</strong> P2P Staking собирает KYB данные (onboarding UI). AMINA проводит screening и одобряет участников (под FINMA лицензией). Клиент должен иметь custody account и токенизировать активы. Онбординг: дни.</p>
+
+<p><strong>Per-loan docs:</strong> none. On-chain record is sufficient.</p>
+
+<p><strong>Disputes:</strong> для asset-backed lending с auto-liquidation нет предмета спора — collateral transfers deterministic по smart contract rules. Если спор всё же возникает — между сторонами напрямую, мы не party.</p>
+
+<!-- ======================================= -->
+<h2>12. Revenue</h2>
+
+<table>
+<tr><td><strong>Total spread</strong></td><td>40 bps</td></tr>
+<tr><td>→ P2P Staking (infrastructure)</td><td>20 bps</td></tr>
+<tr><td>→ AMINA Bank (broker + curator + liquidator)</td><td>20 bps + liquidation bonus</td></tr>
+</table>
+
+<table>
+<tr><th>Volume</th><th>P2P Staking / год</th><th>AMINA / год</th></tr>
+<tr><td>$50M</td><td>$100K</td><td>$100K + bonus</td></tr>
+<tr><td>$500M</td><td>$1M</td><td>$1M + bonus</td></tr>
+<tr><td>$2B</td><td>$4M</td><td>$4M + bonus</td></tr>
+</table>
+
+<!-- ======================================= -->
+<h2>13. Custody providers</h2>
+
+<p>Supply tokens минтятся кастодианами (не нами).</p>
+
+<details>
+<summary>Tokenization capabilities</summary>
+<div class="inner">
+<table>
+<tr><th>Custodian</th><th>Tokenization</th></tr>
+<tr><td>AMINA Bank</td><td><span class="tag t-g">Via Tokeny</span> — EU regulated, ERC-3643, FINMA + MiCA</td></tr>
+<tr><td>Fireblocks</td><td><span class="tag t-g">Full</span> — end-to-end engine, 35+ chains</td></tr>
+<tr><td>Fordefi</td><td><span class="tag t-g">Full</span> — policy engine (acq. by Paxos)</td></tr>
+<tr><td>BitGo</td><td><span class="tag t-y">Partial</span> — needs partner</td></tr>
+<tr><td>Copper</td><td><span class="tag t-r">No</span> — settlement only (ClearLoop)</td></tr>
+<tr><td>Anchorage</td><td><span class="tag t-y">Specialized</span> — US, OCC charter</td></tr>
+</table>
+</div>
+</details>
+
+<!-- ======================================= -->
+<h2>14. Future considerations</h2>
+
+<p><strong>Debt obligation tokens (Type B collateral).</strong> ERC-721 NFT с crypto signature — borrower подписывает обязательство вернуть. Позволяет undercollateralized lending. При дефолте — LCIA арбитраж. Требует дополнительной legal work. Отдельная фаза.</p>
+
+<p><strong>DeFi liquidity channel.</strong> Через DeFi партнёра токенизировать доступ к институциональным ставкам. DeFi юзеры получают 6-10% vs 3-5% на Aave → looping. Мы — underlying infrastructure.</p>
+
+<p><strong>RWA как collateral.</strong> Tokenized treasuries (BUIDL, BENJI, USDY) на custody → AMINA принимает как collateral → заёмщик получает USDC не продавая RWA.</p>
+
+<!-- ======================================= -->
+<h2>15. Open questions</h2>
+
+<table>
+<tr><th>Вопрос</th><th>Статус</th></tr>
+<tr><td>AMINA partnership terms (20 bps confirmed?)</td><td><span class="tag t-y">To confirm</span></td></tr>
+<tr><td>AMINA tokenization scope (Tokeny integration timeline)</td><td><span class="tag t-y">To confirm</span></td></tr>
+<tr><td>First pilot participants (who lends, who borrows)</td><td><span class="tag t-r">Needs input</span></td></tr>
+<tr><td>Cayman legal opinion (tech provider confirmation)</td><td><span class="tag t-y">To schedule</span></td></tr>
+</table>
+
+<div style="margin-top:36px;padding-top:14px;border-top:1px solid #e5e5e7;font-size:12px;color:#86868b;text-align:center">
+Confidential · P2P Staking · May 2026
+</div>
+
+</div>
+</body>
+</html>

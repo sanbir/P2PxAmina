@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P2PxAmina — Proposed Contract Architecture</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,system-ui,'Segoe UI',sans-serif;background:#fff;color:#1d1d1f;line-height:1.75;padding:48px 24px;font-size:15px;-webkit-font-smoothing:antialiased}
+.page{max-width:760px;margin:0 auto}
+h1{font-size:22px;font-weight:700;margin-bottom:2px}
+.meta{font-size:13px;color:#86868b;margin-bottom:32px}
+h2{font-size:17px;font-weight:700;margin:36px 0 10px;padding-top:14px;border-top:2px solid #e5e5e7}
+h3{font-size:15px;font-weight:700;margin:20px 0 6px}
+h4{font-size:14px;font-weight:600;margin:14px 0 4px;color:#444}
+p{margin-bottom:10px}
+ul,ol{margin:8px 0 12px 22px}
+li{margin-bottom:4px}
+code{font-family:'SF Mono',Menlo,monospace;font-size:13px;background:#f5f5f7;padding:1px 5px;border-radius:3px}
+pre{font-family:'SF Mono',Menlo,monospace;font-size:12.5px;background:#f5f5f7;border-radius:6px;padding:14px 16px;margin:10px 0;overflow-x:auto;line-height:1.55}
+.flow{background:#f5f5f7;border-radius:8px;padding:20px;margin:16px 0;overflow-x:auto}
+.note{border-left:3px solid #0071e3;background:#f0f7ff;padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0;font-size:14px}
+.note-green{border-left-color:#34c759;background:#f0faf3}
+.note-amber{border-left-color:#f59e0b;background:#fffbf0}
+.note-red{border-left-color:#ef4444;background:#fff5f5}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{text-align:left;font-weight:600;padding:7px 8px;border-bottom:2px solid #e5e5e7;font-size:12px;color:#86868b;text-transform:uppercase;letter-spacing:.03em}
+td{padding:7px 8px;border-bottom:1px solid #f0f0f2;vertical-align:top;line-height:1.5}
+.tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:3px}
+.t-g{background:#d1f2db;color:#1a7a3a}.t-b{background:#d6e8ff;color:#1a4a7a}.t-y{background:#fff3d6;color:#7a5a1a}.t-r{background:#ffd9d6;color:#c0392b}.t-p{background:#ede5ff;color:#5b21b6}
+details{margin:8px 0;border:1px solid #e5e5e7;border-radius:6px;overflow:hidden}
+details summary{padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600;background:#f5f5f7;list-style:none;display:flex;align-items:center;gap:8px}
+details summary::before{content:'▶';font-size:9px;transition:transform .2s}
+details[open] summary::before{transform:rotate(90deg)}
+details .inner{padding:12px 14px;font-size:14px}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:2px;margin:12px 0;font-size:13px;border:1px solid #e5e5e7;border-radius:6px;overflow:hidden}
+.compare div{padding:8px 10px;background:#f5f5f7}
+.compare div:nth-child(odd){background:#fff}
+.compare .ch{font-weight:600;color:#86868b;font-size:11px;text-transform:uppercase;background:#e5e5e7 !important}
+.layer{background:#fafafa;border:1px solid #e5e5e7;border-radius:8px;padding:14px 18px;margin:14px 0}
+.layer h3{margin-top:0}
+.layer .lbl{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:3px;background:#e5e5e7;color:#444;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em}
+.ascii{font-family:'SF Mono',Menlo,monospace;font-size:11.5px;background:#f5f5f7;padding:14px 16px;border-radius:6px;line-height:1.5;white-space:pre;overflow-x:auto}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>P2PxAmina — Proposed Smart Contract Architecture</h1>
+<p class="meta">Design exploration · v0.1 · companion to <em>Segregated Institutional Lending Protocol v0.7</em></p>
+
+<!-- ============================================================ -->
+<h2>1. Design constraints unique to this protocol</h2>
+
+<p>The product brief in <code>P2PxAmina-lending-protocol-for-banks</code> describes a system that <em>looks</em> like a lending market but obeys a different set of rules than AAVE or Compound. The contract design must reflect those rules — borrowing AAVE/Compound primitives blindly will produce something that is over-engineered for the actual scope and yet missing the right primitives.</p>
+
+<p>The constraints, in declining order of architectural impact:</p>
+
+<table>
+<tr><th>#</th><th>Constraint</th><th>Architectural consequence</th></tr>
+<tr><td>1</td><td><strong>Bilateral, not pooled.</strong> Each loan is a deal between a specific lender and a specific borrower. No commingling of risk.</td><td>No utilization curve. No share token. No pro-rata loss socialisation. Each deal is its own escrow.</td></tr>
+<tr><td>2</td><td><strong>Fixed term, fixed rate.</strong> Rate is set off-chain by AMINA and frozen into the deal at creation.</td><td>No interest-rate strategy contract. Interest is linear, computed on-the-fly from <code>(principal, rate, startTs, nowTs)</code>.</td></tr>
+<tr><td>3</td><td><strong>Permissioned counterparties.</strong> Every address acting as lender, borrower, or collateral source has been KYB'd by AMINA under a FINMA licence.</td><td>Identity gate at every state-changing entry point. Supply &amp; collateral tokens are themselves permissioned (ERC-3643 or allow-list-flavoured ERC-20).</td></tr>
+<tr><td>4</td><td><strong>Permissioned liquidator.</strong> Only AMINA can liquidate. Recovery is "AMINA redeems collateral at custody," not a Dutch auction.</td><td>No permissionless <code>liquidationCall</code>. No bonus curve. No keeper economics. Liquidation is a privileged, deterministic settlement.</td></tr>
+<tr><td>5</td><td><strong>Tokens are claims on custody.</strong> Supply tokens (Token B) and collateral tokens (Token A) are minted 1:1 by regulated custodians against assets they hold.</td><td>The on-chain layer never holds the "real" asset. The trust anchor is the custodian's redemption, not on-chain reserves. Token whitelist becomes a critical governance surface.</td></tr>
+<tr><td>6</td><td><strong>Matching is off-chain.</strong> Lenders and borrowers do not see each other. AMINA's licensed brokerage matches them; the chain only records the result.</td><td>The contract never picks counterparties. Deals arrive on-chain already matched, with EIP-712 signatures from both sides + AMINA's broker attestation.</td></tr>
+<tr><td>7</td><td><strong>Privacy by separation.</strong> Pool-style accounting would leak counterparty information through share-token graphs.</td><td>Per-deal escrow gives natural pseudonymity. Counterparties don't share any on-chain state that links them, beyond the deal record itself (which is the minimum legally required record).</td></tr>
+<tr><td>8</td><td><strong>~1,000–1,500 lines of Solidity.</strong> The v0.7 brief explicitly bounds the scope.</td><td>Discipline. Resist the urge to port AAVE v4's full hub/spoke split, position-manager layer, and dynamic config matrix. Use the patterns; trim the surface.</td></tr>
+</table>
+
+<div class="note">
+<strong>One-line summary.</strong> Build a fixed-term bilateral repo escrow with a permissioned identity gate, a single privileged liquidator, and an off-chain matching brain — borrowing AAVE v4's <em>structural</em> ideas (configurator/role separation, oracle isolation, dynamic risk versioning) without inheriting its pool-based <em>economic</em> machinery.
+</div>
+
+<!-- ============================================================ -->
+<h2>2. What carries over from AAVE/Compound, and what does not</h2>
+
+<div class="compare">
+<div class="ch">From AAVE v3/v4 — keep</div><div class="ch">From AAVE v3/v4 — drop</div>
+<div>Configurator pattern: a thin governance-only wrapper that mutates a storage struct on the core contract.</div><div>Utilisation curve + per-asset <code>InterestRateStrategy</code>. We have no pool, so no utilisation.</div>
+<div>OpenZeppelin <code>AccessManager</code> as the root permissioning layer, with <code>restricted</code> modifiers on governance setters.</div><div>aTokens / debt tokens (ERC-20 wrappers around supplier/borrower shares). Bilateral deals don't share economics, so share tokens add no value.</div>
+<div>Per-market oracle aggregator (<code>AaveOracle</code> with composite adapters / CAPO caps).</div><div>Permissionless <code>liquidationCall</code>, Dutch-auction bonus, target health factor. Liquidator is privileged here.</div>
+<div>Dynamic risk configuration (versioned parameters). Useful when AMINA tightens LTV on Class B collateral and existing deals must be grandfathered.</div><div>Position Manager layer for delegated multi-action flows. Out of scope at v1.</div>
+<div>Emergency states (paused / frozen / halted / deactivated) and their semantic separation.</div><div>Reinvestment / sweep module — idle liquidity does not exist here, custody holds the real assets.</div>
+<div>Per-Spoke isolation: oracle compromise on one market does not poison another. We use the same idea per <em>collateral class</em>.</div><div>Hub/Spoke split. With one shared escrow contract and a single product line, splitting custodian from rulebook adds complexity without benefit.</div>
+</div>
+
+<div class="compare">
+<div class="ch">From Compound v3 (Comet) — keep</div><div class="ch">From Compound v3 — drop</div>
+<div>Single-borrow-asset-per-market discipline. Each deal borrows exactly one supply token; collateral can be one or many.</div><div>Per-market <code>Comet</code> deployment per asset. We deploy one engine and parameterise by token pair.</div>
+<div>Storage-layout-first design: explicit <code>...Storage</code> contracts to keep upgrade safety obvious.</div><div>COMP rewards / liquidity mining. No protocol token in v1.</div>
+<div>The Configurator-as-factory pattern (Comet's <code>Configurator</code> + <code>CometProxyAdmin</code>) — useful if we later allow AMINA to spin up a per-counterparty escrow class.</div><div>Permissionless <code>absorb</code> + reserve-driven backstop. AMINA absorbs defaults outside-of-chain via custody.</div>
+</table>
+
+<!-- ============================================================ -->
+<h2>3. Alternative architectures we considered</h2>
+
+<p>Three credible designs were on the table before settling on the recommendation in §4. Documenting them keeps the trade-offs explicit.</p>
+
+<h3>Design A — Per-deal proxy clone</h3>
+
+<p>Each deal is its own minimal proxy (EIP-1167) pointing at a shared <code>DealEscrow</code> implementation. The factory mints proxies on settlement.</p>
+
+<ul>
+<li><strong>Pro</strong> — maximum isolation. A bug or upgrade affecting one deal cannot affect another. Storage of each deal is physically separate. Privacy: each deal is its own address on the chain explorer.</li>
+<li><strong>Pro</strong> — clean lifecycle: deal closes → proxy self-destructs (or marks itself terminal), permanent record on-chain.</li>
+<li><strong>Con</strong> — gas: ~50k extra per deal for the proxy deploy. For institutional volume (deals worth $100k+) this is irrelevant in cost but produces address-explorer noise.</li>
+<li><strong>Con</strong> — operational: monitoring across N proxies needs an off-chain index. AMINA's curator UI needs a list endpoint.</li>
+<li><strong>Verdict</strong> — strongest pure-design choice, but heavier than the v0.7 scope warrants. Worth reconsidering in v2 if deals become per-counterparty bespoke.</li>
+</ul>
+
+<h3>Design B — Compound-style per-collateral-class market</h3>
+
+<p>One <code>LendingEngine</code> per (supply token × collateral class). All deals borrowing USDC against BTC collateral live in one contract; USDC-against-ETH lives in another.</p>
+
+<ul>
+<li><strong>Pro</strong> — natural risk isolation by collateral class. Compromising the BTC oracle does not touch ETH deals.</li>
+<li><strong>Pro</strong> — well-trodden pattern (Comet did exactly this).</li>
+<li><strong>Con</strong> — deal-level data still has to be per-deal inside each market. The market boundary buys little once you accept the constraint of bilateral fixed-term deals.</li>
+<li><strong>Con</strong> — N markets is N audit surfaces, and each new collateral type requires a new deployment.</li>
+<li><strong>Verdict</strong> — overkill for v1 (which targets BTC/ETH/USDC). Right call if the product expands into many heterogeneous RWA collateral classes.</li>
+</ul>
+
+<h3>Design C — single shared engine, deal as struct</h3>
+
+<p>One <code>LendingEngine</code> contract. Each deal is a <code>dealId → Deal</code> entry in a mapping. All state transitions go through the same entry points, gated by deal-state checks.</p>
+
+<ul>
+<li><strong>Pro</strong> — smallest contract surface and audit footprint. Fits the 1,000–1,500 LOC budget naturally.</li>
+<li><strong>Pro</strong> — easiest to reason about — one engine, one set of invariants.</li>
+<li><strong>Pro</strong> — composability: cross-deal operations (batch repay, portfolio view) are trivially cheap.</li>
+<li><strong>Con</strong> — isolation is logical, not physical. A reentrancy or storage-collision bug touches every deal at once.</li>
+<li><strong>Con</strong> — privacy is by indirection only. All deals share one address, so explorer-level inspection is easier than with Design A.</li>
+<li><strong>Verdict</strong> — recommended for v1. Mitigate the isolation downside with strict per-deal state guards, a non-reentrant skeleton, and a paused/halted kill switch.</li>
+</ul>
+
+<div class="note-green note">
+<strong>Recommendation:</strong> Design C with the option to migrate to Design A in v2 by factoring the <code>Deal</code> struct into a per-deal contract via the existing <code>EscrowVault</code> abstraction.
+</div>
+
+<!-- ============================================================ -->
+<h2>4. Proposed architecture — overview</h2>
+
+<p>Six logical layers, ten Solidity contracts. The split mirrors AAVE v4's separation between custody, rule engine, and configurator, but at a fraction of the surface.</p>
+
+<div class="ascii">┌──────────────────────────────────────────────────────────────────────┐
+│                        OFF-CHAIN (P2P + AMINA)                       │
+│   Matching engine · Rate engine · Order book · KYB UI · Dashboard    │
+│                  AMINA monitoring + liquidation bot                  │
+└────────────────────────────────┬─────────────────────────────────────┘
+                                 │ EIP-712 signed deal terms
+                                 ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  L1 — GOVERNANCE & IDENTITY                                          │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────┐  │
+│  │  RoleManager   │  │  KYBGateway    │  │  IssuerRegistry        │  │
+│  │  (OZ AM)       │  │  (id allowlist)│  │  (custodian + tokens)  │  │
+│  └───────┬────────┘  └────────┬───────┘  └───────────┬────────────┘  │
+└──────────┼────────────────────┼──────────────────────┼───────────────┘
+           │                    │                      │
+┌──────────┼────────────────────┼──────────────────────┼───────────────┐
+│  L2 — RISK ENGINE                                                    │
+│  ┌───────▼──────────────┐  ┌──▼──────────────────┐  ┌────────────┐   │
+│  │  CollateralRegistry  │  │  OracleRouter       │  │  RiskConfig│   │
+│  │  (LTV per pair)      │  │  (per-token feeds)  │  │  Versioning│   │
+│  └────────┬─────────────┘  └──────────┬──────────┘  └─────┬──────┘   │
+└───────────┼──────────────────────────┬┴───────────────────┼──────────┘
+            │                          │                    │
+┌───────────┼──────────────────────────┼────────────────────┼──────────┐
+│  L3 — DEAL ENGINE (core)                                             │
+│  ┌────────▼─────────┐  ┌─────────────▼──────┐  ┌─────────▼────────┐  │
+│  │  DealRegistry    │  │  LendingEngine     │  │  EscrowVault     │  │
+│  │  (deal terms)    │  │  (state machine)   │  │  (token custody) │  │
+│  └────────┬─────────┘  └─────────┬──────────┘  └────────┬─────────┘  │
+└───────────┼──────────────────────┼──────────────────────┼────────────┘
+            │                      │                      │
+┌───────────┼──────────────────────┼──────────────────────┼────────────┐
+│  L4 — SETTLEMENT & LIQUIDATION                                       │
+│  ┌────────▼─────────┐  ┌─────────▼──────────┐                        │
+│  │  SettlementRouter│  │  LiquidationHandler│                        │
+│  │  (custody events)│  │  (AMINA-only)      │                        │
+│  └──────────────────┘  └────────────────────┘                        │
+└──────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│              CUSTODY LAYER — AMINA / Fireblocks / BitGo              │
+│            (mint/burn Token A &amp; B, real-asset redemption)            │
+└──────────────────────────────────────────────────────────────────────┘</div>
+
+<table>
+<tr><th>#</th><th>Contract</th><th>One-line purpose</th><th>~LOC</th></tr>
+<tr><td>1</td><td><code>RoleManager</code></td><td>Root permissioning: who is GOVERNOR, CURATOR (AMINA), LIQUIDATOR, EMERGENCY.</td><td>40 + OZ</td></tr>
+<tr><td>2</td><td><code>KYBGateway</code></td><td>Identity allow-list. Maps wallet → KYB status (active / suspended / revoked).</td><td>80</td></tr>
+<tr><td>3</td><td><code>IssuerRegistry</code></td><td>Whitelist of accepted custodians and the supply / collateral tokens they issue.</td><td>120</td></tr>
+<tr><td>4</td><td><code>OracleRouter</code></td><td>Token → price-source registry. Composite feeds + per-feed staleness caps.</td><td>120</td></tr>
+<tr><td>5</td><td><code>CollateralRegistry</code></td><td>Per-(collateral, supply) pair risk: LTV, warning / partial / full thresholds, interest cap. Versioned.</td><td>160</td></tr>
+<tr><td>6</td><td><code>DealRegistry</code></td><td>Immutable deal terms, EIP-712 verification of lender + borrower + AMINA signatures.</td><td>180</td></tr>
+<tr><td>7</td><td><code>EscrowVault</code></td><td>Token custody for collateral and supply tokens. Pull-only access by <code>LendingEngine</code>.</td><td>140</td></tr>
+<tr><td>8</td><td><code>LendingEngine</code></td><td>State machine: open → active → matured/liquidating → repaid/liquidated.</td><td>260</td></tr>
+<tr><td>9</td><td><code>LiquidationHandler</code></td><td>AMINA-only liquidation: warn → partial → full. Emits custody settlement intents.</td><td>180</td></tr>
+<tr><td>10</td><td><code>SettlementRouter</code></td><td>Emits typed events for off-chain custody integration. No state.</td><td>60</td></tr>
+<tr><td colspan="3" style="text-align:right;font-weight:600">Total target</td><td><strong>≈ 1,340</strong></td></tr>
+</table>
+
+<p>Inside the v0.7 budget of 1,000–1,500 lines, leaving ~150 LOC of headroom for libraries (<code>FixedMath</code>, <code>EIP712Hash</code>, <code>SafeERC20</code> wrappers).</p>
+
+<!-- ============================================================ -->
+<h2>5. Contract-by-contract specification</h2>
+
+<!-- -------- 5.1 RoleManager -------- -->
+<div class="layer">
+<span class="lbl">L1 · governance</span>
+<h3><code>RoleManager</code></h3>
+<p>Thin wrapper around OpenZeppelin's <code>AccessManager</code>. Defines the canonical roles. Every <code>restricted</code> function elsewhere in the system delegates its check here.</p>
+
+<table>
+<tr><th>Role</th><th>Holder</th><th>Can do</th></tr>
+<tr><td><code>GOVERNOR</code></td><td>P2P Staking multisig</td><td><code>grantRole</code>, contract upgrades, emergency unpause, whitelist new contracts.</td></tr>
+<tr><td><code>CURATOR</code></td><td>AMINA Bank multisig</td><td>Add/update collateral pairs, set LTVs, set per-issuer parameters, approve KYB.</td></tr>
+<tr><td><code>LIQUIDATOR</code></td><td>AMINA bot wallets (rotatable)</td><td>Call <code>warn</code>, <code>partialLiquidate</code>, <code>fullLiquidate</code> on deals.</td></tr>
+<tr><td><code>EMERGENCY</code></td><td>Joint: P2P + AMINA (2-of-2)</td><td>Pause specific deals, pause a collateral pair, halt the entire engine.</td></tr>
+<tr><td><code>ORACLE_ADMIN</code></td><td>AMINA + Chainlink ops</td><td>Register / rotate price feeds. Cannot deactivate a feed mid-deal.</td></tr>
+</table>
+
+<p>Why explicit roles instead of <code>onlyOwner</code>: AMINA's regulatory posture requires a paper trail of who-changed-what, and AMINA's hot wallets rotate. <code>AccessManager</code> gives both for free.</p>
+</div>
+
+<!-- -------- 5.2 KYBGateway -------- -->
+<div class="layer">
+<span class="lbl">L1 · identity</span>
+<h3><code>KYBGateway</code></h3>
+<p>Maps an EVM address to a KYB status. P2P collects KYB documents off-chain; AMINA reviews under its FINMA banking licence and writes the final status on-chain.</p>
+
+<pre>enum KybStatus { Unknown, Approved, Suspended, Revoked }
+
+struct KybRecord {
+    KybStatus status;
+    uint64 approvedAt;          // ts of last approval
+    uint64 reviewedUntil;       // expiry — periodic re-attestation
+    bytes32 documentsHash;      // hash of off-chain KYB packet
+    address approvedBy;         // AMINA signer who attested
+}
+
+mapping(address =&gt; KybRecord) public records;
+
+function setStatus(address wallet, KybStatus s, bytes32 docsHash, uint64 until)
+    external onlyRole(CURATOR);
+
+function require Approved(address wallet) external view;  // reverts if not approved or expired</pre>
+
+<p><strong>Reviewed-until expiry</strong> is a quiet but important detail: regulators require periodic re-attestation. An AMINA-approved wallet that has not been re-reviewed in N months should fail the gate without requiring a separate Suspended write.</p>
+
+<p>Every state-changing entry point in <code>LendingEngine</code> calls <code>KYBGateway.requireApproved(msg.sender)</code> and, for <code>openDeal</code>, also <code>requireApproved(counterparty)</code>. This is the protocol's hard "no anon users" boundary.</p>
+</div>
+
+<!-- -------- 5.3 IssuerRegistry -------- -->
+<div class="layer">
+<span class="lbl">L1 · registry</span>
+<h3><code>IssuerRegistry</code></h3>
+<p>The list of custodians and their tokens. Every supply or collateral token used in a deal must be registered here.</p>
+
+<pre>struct TokenInfo {
+    address custodian;          // who mints/burns
+    TokenKind kind;             // Supply or Collateral
+    uint8 decimals;             // cached
+    bool paused;                // emergency stop for this token
+    bytes32 attestationHash;    // pointer to off-chain redemption guarantee
+}
+
+mapping(address =&gt; TokenInfo) public tokens;</pre>
+
+<p>Two invariants enforced at deal creation:</p>
+
+<ol>
+<li>Supply tokens (Token B) must have <code>kind = Supply</code>; collateral tokens (Token A) must have <code>kind = Collateral</code>. A token issued for one purpose cannot be silently repurposed for the other.</li>
+<li>The token is not paused. Pausing a token at the registry blocks new deals using it but leaves existing deals operating (so existing deals can still be repaid or liquidated).</li>
+</ol>
+
+<p>The registry is the single source of truth that connects the on-chain world to the custody assertion "this token is backed 1:1." If AMINA delists a Fireblocks-issued token here, the protocol stops accepting it for new deals instantly.</p>
+</div>
+
+<!-- -------- 5.4 OracleRouter -------- -->
+<div class="layer">
+<span class="lbl">L2 · risk</span>
+<h3><code>OracleRouter</code></h3>
+<p>Per-token price feed registry. Modelled on AAVE's <code>AaveOracle</code> but per-collateral-pair rather than per-Spoke.</p>
+
+<pre>struct Feed {
+    address source;             // Chainlink aggregator or composite adapter
+    uint32 heartbeat;           // max staleness in seconds
+    uint8 sourceDecimals;       // 8 for Chainlink USD pairs
+    bool active;
+}
+
+mapping(address =&gt; Feed) public feeds;
+
+function getUsdValue(address token, uint256 amount) external view returns (uint256);</pre>
+
+<p>For tokenised BTC LSTs (LBTC, eBTC) the feed should be a composite adapter (LBTC/BTC rate × BTC/USD Chainlink), with a CAPO-style cap on the LBTC/BTC component — exactly the pattern AAVE has formalised for wstETH and LBTC.</p>
+
+<p>The heartbeat check is enforced inside <code>getUsdValue</code>: if the feed is older than <code>heartbeat</code> seconds, the call reverts. New deals cannot open against a stale feed; liquidations can still proceed at the last sane price (AMINA decides via off-chain risk policy whether to accept).</p>
+</div>
+
+<!-- -------- 5.5 CollateralRegistry -------- -->
+<div class="layer">
+<span class="lbl">L2 · risk</span>
+<h3><code>CollateralRegistry</code></h3>
+<p>The risk-parameter source of truth. One entry per (collateral token, supply token) pair.</p>
+
+<pre>struct Params {
+    uint16 ltvBps;              // e.g. 8500 = 85%
+    uint16 warningBps;          // e.g. 9000 = 90% LTV triggers warn
+    uint16 partialLiqBps;       // e.g. 9300 = 93% LTV triggers partial liq
+    uint16 fullLiqBps;          // e.g. 9500 = 95% LTV triggers full liq
+    uint32 maxMaturity;         // seconds — cap on deal length
+    uint16 maxRateBps;          // sanity cap on deal rate
+    bool active;
+}
+
+mapping(bytes32 =&gt; Params) public paramsByPair;          // keccak(collateral, supply)
+mapping(uint32 =&gt; bytes32) public versionKey;            // version → param key
+uint32 public latestVersion;</pre>
+
+<p><strong>Versioning, AAVE-v4 style.</strong> When AMINA tightens the LTV on Class B collateral, existing deals must not auto-liquidate. The current version is snapshotted into a deal at <code>openDeal</code> time; the deal carries that <code>uint32 versionKey</code> for its lifetime. The check is:</p>
+
+<ul>
+<li>Risk-<em>reducing</em> actions (top-up collateral, partial repay) always use the deal's snapshot version.</li>
+<li>Risk-<em>increasing</em> actions (none exist in this model post-creation, since deals are fixed at open) are not applicable.</li>
+<li>New deals always use <code>latestVersion</code>.</li>
+</ul>
+
+<p>This means AMINA can publish a tightened risk schedule without retroactively endangering live deals — and the on-chain history of versions is itself an audit log.</p>
+</div>
+
+<!-- -------- 5.6 DealRegistry -------- -->
+<div class="layer">
+<span class="lbl">L3 · deal engine</span>
+<h3><code>DealRegistry</code></h3>
+<p>Append-only record of deal terms. A deal is created on-chain only after off-chain matching, signed by all three parties, and never mutated.</p>
+
+<pre>struct DealTerms {
+    address lender;
+    address borrower;
+    address supplyToken;        // Token B (e.g. custody-issued USDC)
+    address collateralToken;    // Token A (e.g. custody-issued BTC)
+    uint128 principal;          // in supplyToken units
+    uint128 collateralAmount;   // in collateralToken units
+    uint32 rateBps;             // simple-interest annual rate
+    uint64 startTs;
+    uint64 maturityTs;
+    uint32 collateralVersion;   // snapshot of CollateralRegistry version
+    bytes32 termsHash;          // EIP-712 hash of all terms
+}
+
+mapping(bytes32 =&gt; DealTerms) public terms;              // dealId → terms
+
+function recordDeal(
+    DealTerms calldata t,
+    bytes calldata lenderSig,
+    bytes calldata borrowerSig,
+    bytes calldata aminaSig                              // matching attestation
+) external onlyRole(CURATOR) returns (bytes32 dealId);</pre>
+
+<p><strong>Three signatures, not two.</strong> The lender and borrower each sign their bilateral consent. AMINA's signature is the <em>brokerage attestation</em> — the regulated record that this match was performed under its Securities Dealer licence. Without all three, the deal cannot be opened. This is the on-chain analogue of the trade confirmation in a TradFi repo.</p>
+
+<p>Deal terms are immutable. Modifying a live deal (extension, restructure, novation) is modelled as <em>closing the old deal and opening a new one</em>, both happening atomically in a batch call. This preserves audit clarity.</p>
+</div>
+
+<!-- -------- 5.7 EscrowVault -------- -->
+<div class="layer">
+<span class="lbl">L3 · deal engine</span>
+<h3><code>EscrowVault</code></h3>
+<p>Holds tokens. Has exactly one allowed caller: <code>LendingEngine</code>. All movement is through typed methods so that token IDs cannot accidentally cross between deals.</p>
+
+<pre>// Per-deal balance ledger
+mapping(bytes32 =&gt; mapping(address =&gt; uint256)) public balanceOf;
+//      dealId            token
+
+function pullCollateral(bytes32 dealId, address from, uint256 amount) external onlyEngine;
+function releaseCollateral(bytes32 dealId, address to, uint256 amount) external onlyEngine;
+function pullSupply     (bytes32 dealId, address from, uint256 amount) external onlyEngine;
+function releaseSupply  (bytes32 dealId, address to,   uint256 amount) external onlyEngine;</pre>
+
+<p>The single shared vault holds all deals' tokens but the per-deal ledger means no two deals can ever read or write each other's balance. This is the logical-isolation equivalent of Design A's physical isolation.</p>
+
+<p>One subtle invariant: the sum of <code>balanceOf[*][token]</code> across all deals must always equal the vault's actual ERC-20 balance for <code>token</code>. The contract enforces this only on writes; an explicit <code>syncCheck(token)</code> view function lets governance reconcile periodically.</p>
+</div>
+
+<!-- -------- 5.8 LendingEngine -------- -->
+<div class="layer">
+<span class="lbl">L3 · deal engine</span>
+<h3><code>LendingEngine</code></h3>
+<p>The state machine. Reads from every other contract; writes deal state.</p>
+
+<pre>enum DealState {
+    None,
+    Pending,        // recorded but tokens not yet posted
+    Active,         // both legs posted, accruing interest
+    Warned,         // LTV ≥ warning, 48h grace
+    Liquidating,    // partial or full liquidation in progress
+    Matured,        // maturity reached, awaiting repay
+    Repaid,         // terminal: borrower repaid in full
+    Liquidated,     // terminal: AMINA closed via custody
+    Defaulted       // terminal: residual debt after liquidation
+}
+
+struct DealState_t {
+    DealState state;
+    uint128 outstanding;        // principal + accrued interest snapshot
+    uint128 collateralPosted;   // current collateral balance
+    uint64 lastTouchTs;         // last interest-snapshot time
+    uint32 versionKey;          // snapshot from CollateralRegistry
+}
+
+mapping(bytes32 =&gt; DealState_t) public state;</pre>
+
+<p><strong>Entry points (callable by parties to a specific deal):</strong></p>
+<table>
+<tr><th>Function</th><th>Caller</th><th>State transitions</th></tr>
+<tr><td><code>activate(dealId)</code></td><td>lender or borrower</td><td>Pending → Active. Pulls collateral from borrower, pulls supply from lender, releases supply to borrower (atomic).</td></tr>
+<tr><td><code>topUpCollateral(dealId, amount)</code></td><td>borrower</td><td>Active/Warned → Active. Always allowed; never raises risk.</td></tr>
+<tr><td><code>repay(dealId, amount)</code></td><td>borrower (or anyone)</td><td>Partial: stays in same state. Full: → Repaid. Pulls supply, releases collateral.</td></tr>
+<tr><td><code>warn(dealId)</code></td><td><code>LIQUIDATOR</code></td><td>Active → Warned. No token movement. Starts 48-h grace clock.</td></tr>
+<tr><td><code>partialLiquidate(dealId, amount)</code></td><td><code>LIQUIDATOR</code></td><td>Warned → Active (if cured) or Liquidating. Calls <code>LiquidationHandler</code>.</td></tr>
+<tr><td><code>fullLiquidate(dealId)</code></td><td><code>LIQUIDATOR</code></td><td>Liquidating → Liquidated or Defaulted.</td></tr>
+<tr><td><code>settleMaturity(dealId)</code></td><td>anyone after maturity</td><td>Active/Warned → Matured. If unpaid after grace, <code>LIQUIDATOR</code> can call <code>fullLiquidate</code>.</td></tr>
+</table>
+
+<p><strong>Interest accrual model</strong> — simple, not compounding, snapshotted on every state change:</p>
+
+<pre>function _accrue(bytes32 dealId) internal {
+    DealTerms storage t = registry.terms(dealId);
+    DealState_t storage s = state[dealId];
+    uint64 dt = uint64(block.timestamp) - s.lastTouchTs;
+    uint256 add = uint256(t.principal) * t.rateBps * dt / (365 days * 10000);
+    s.outstanding += uint128(add);
+    s.lastTouchTs = uint64(block.timestamp);
+}</pre>
+
+<p>Simple interest is sufficient because deals are short (typically 30–90 days) and the cost-of-capital convention in institutional repo is also simple-interest day-count. Skipping compounding shaves complexity and removes a class of rounding-edge bugs.</p>
+
+<p><strong>Health factor:</strong></p>
+<pre>HF = collateralValueUSD × ltvBps / (outstandingValueUSD × 10000)</pre>
+<p>HF ≥ 1 means safe. <code>warningBps</code>, <code>partialLiqBps</code>, <code>fullLiqBps</code> from <code>CollateralRegistry</code> define the action thresholds, but only AMINA may pull the trigger — the contract <em>permits</em> liquidation when conditions are met, it does not allow anyone to <em>perform</em> it.</p>
+</div>
+
+<!-- -------- 5.9 LiquidationHandler -------- -->
+<div class="layer">
+<span class="lbl">L4 · liquidation</span>
+<h3><code>LiquidationHandler</code></h3>
+<p>The privileged liquidation actor. Only addresses with the <code>LIQUIDATOR</code> role can call it. Three flows:</p>
+
+<table>
+<tr><th>Flow</th><th>Trigger</th><th>What happens on-chain</th></tr>
+<tr><td><strong>Warn</strong></td><td>HF crosses <code>warningBps</code></td><td>State → Warned. Event emitted, off-chain notification fires. No token movement. 48-hour grace clock starts.</td></tr>
+<tr><td><strong>Partial</strong></td><td>HF crosses <code>partialLiqBps</code> and grace expired (or borrower opt-in)</td><td>AMINA computes amount to bring deal back to safe LTV. Engine releases that fraction of collateral to AMINA's settlement address. AMINA, off-chain, redeems at custody and uses the proceeds to reduce the deal's outstanding.</td></tr>
+<tr><td><strong>Full</strong></td><td>HF crosses <code>fullLiqBps</code>, or maturity passed with debt outstanding</td><td>All remaining collateral released to AMINA. Deal moves to Liquidated. If residual debt remains (collateral value &lt; outstanding), deal moves to Defaulted and emits an event for off-chain accounting; protocol records the shortfall but does NOT socialise it.</td></tr>
+</table>
+
+<p><strong>Why no bonus / no auction.</strong> AMINA is the broker, not an arbitrageur. The economics of repaying the lender, redeeming the collateral, and selling it on a regulated venue happen entirely under AMINA's licence and balance sheet. The contract's job is only to deterministically authorise the collateral transfer when the threshold has been crossed.</p>
+
+<p><strong>Replay safety.</strong> Each liquidation step is identified by a monotonically increasing <code>step</code> counter on the deal. AMINA cannot accidentally trigger a partial liquidation twice; the engine rejects calls with a stale step number.</p>
+
+<div class="note-amber note">
+<strong>Operational risk to be aware of:</strong> the contract relies on AMINA to follow through on the off-chain redemption. If AMINA receives collateral on-chain but fails to credit the lender off-chain, the lender's remedy is a regulated complaint against AMINA, not an on-chain mechanism. This is intentional and matches the BNY Mellon analogy — the agent's reputation and licence is the enforcement layer. The contract's job ends at "collateral delivered to AMINA's settlement wallet."
+</div>
+</div>
+
+<!-- -------- 5.10 SettlementRouter -------- -->
+<div class="layer">
+<span class="lbl">L4 · settlement</span>
+<h3><code>SettlementRouter</code></h3>
+<p>A stateless event emitter that gives the off-chain custody integration a stable schema. Every meaningful settlement event (advance, repay, top-up, liquidation, redemption intent) is mirrored here with structured fields the custodian's listener can pick up.</p>
+
+<pre>event AdvanceIntent(bytes32 indexed dealId, address indexed token, uint256 amount, address to);
+event RedemptionIntent(bytes32 indexed dealId, address indexed token, uint256 amount, address from);
+event LiquidationIntent(bytes32 indexed dealId, address indexed collateralToken, uint256 amount, address aminaSettlement);
+event MaturityReached(bytes32 indexed dealId, uint256 outstanding);
+event Defaulted(bytes32 indexed dealId, uint256 shortfallUsd);</pre>
+
+<p>Splitting the event surface out of <code>LendingEngine</code> keeps that contract focused on state transitions and gives custodian engineering teams one well-defined ABI to integrate against. The events also become the canonical reconciliation feed for the off-chain dashboard.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>6. Lifecycle of a deal — end-to-end</h2>
+
+<p>Concrete walkthrough of one deal from off-chain match to terminal state, showing which contract handles each step.</p>
+
+<div class="ascii">    OFF-CHAIN                          ON-CHAIN
+    ─────────                          ────────
+
+①  Lender + borrower place orders
+   in P2P matching engine
+   (under AMINA's brokerage licence)
+
+②  AMINA assigns base rate,
+   LTV, maturity to the match
+
+③  Match struct built off-chain:
+   (lender, borrower, principal,
+    collateral, rate, maturity)
+
+④  All three parties sign EIP-712  ──────►  DealRegistry.recordDeal(...)
+   (lender, borrower, AMINA)                ├─ verify 3 sigs
+                                            ├─ check KYBGateway for L &amp; B
+                                            ├─ check IssuerRegistry for tokens
+                                            ├─ snapshot CollateralRegistry version
+                                            └─ assign dealId
+                                                        │
+                                                        ▼
+⑤  Lender approves supplyToken    ──────►  LendingEngine.activate(dealId)
+   Borrower approves collateral             ├─ EscrowVault.pullCollateral()
+                                            ├─ EscrowVault.pullSupply()
+                                            ├─ EscrowVault.releaseSupply(borrower)
+                                            └─ state := Active
+                                                        │
+⑥  Off-chain: borrower redeems              SettlementRouter emits AdvanceIntent
+   supplyToken at custody for                Custodian listens, burns supplyToken,
+   real USDC                                 transfers real USDC to borrower
+
+⑦  Time passes — interest accrues
+   (no on-chain accrual until next
+   touch; computed JIT in HF check)
+
+⑧  Periodic: AMINA bot reads HF   ──────►  LendingEngine.getHealthFactor(dealId)
+   off-chain via view call
+
+   Three branches from here:
+   ┌──────────────┬──────────────┬─────────────────┐
+   │  Healthy     │  Warn fired  │  Liq fired      │
+   ▼              ▼              ▼
+
+⑨a Borrower repays at maturity   ──────►  LendingEngine.repay(dealId, fullAmount)
+                                            ├─ EscrowVault.pullSupply(borrower)
+                                            ├─ EscrowVault.releaseCollateral(borrower)
+                                            ├─ state := Repaid
+                                            └─ SettlementRouter.RedemptionIntent
+
+⑨b LTV crossed warningBps        ──────►  LendingEngine.warn(dealId) [LIQUIDATOR]
+                                            ├─ state := Warned
+                                            └─ event Warned(dealId, 48h deadline)
+   Borrower has 48h to top up   ──────►   LendingEngine.topUpCollateral(...)
+                                          (returns to Active)
+
+⑨c LTV crossed fullLiqBps        ──────►  LendingEngine.fullLiquidate(dealId)
+   OR maturity + grace expired              ├─ EscrowVault.releaseCollateral(AMINA)
+                                            ├─ state := Liquidated (or Defaulted)
+                                            └─ SettlementRouter.LiquidationIntent
+
+⑩  AMINA, off-chain:
+   - redeems collateral at custody
+   - pays lender the principal + accrued
+   - books shortfall (if any) to itself</div>
+
+<!-- ============================================================ -->
+<h2>7. Permissions matrix</h2>
+
+<table>
+<tr><th>Action</th><th>Caller</th><th>Gating</th></tr>
+<tr><td>Register a new custodian or token</td><td><code>GOVERNOR</code></td><td>RoleManager</td></tr>
+<tr><td>Approve / suspend KYB for a wallet</td><td><code>CURATOR</code> (AMINA)</td><td>RoleManager</td></tr>
+<tr><td>Add / update collateral pair params, version bump</td><td><code>CURATOR</code></td><td>RoleManager + bound checks</td></tr>
+<tr><td>Register / rotate a price feed</td><td><code>ORACLE_ADMIN</code></td><td>RoleManager + heartbeat sanity</td></tr>
+<tr><td><code>recordDeal</code></td><td><code>CURATOR</code> + 3 EIP-712 sigs</td><td>RoleManager + signature verification</td></tr>
+<tr><td><code>activate</code> / <code>topUpCollateral</code> / <code>repay</code></td><td>borrower or lender of that deal</td><td>per-deal party check + KYBGateway</td></tr>
+<tr><td><code>warn</code> / <code>partialLiquidate</code> / <code>fullLiquidate</code></td><td><code>LIQUIDATOR</code> (AMINA bot)</td><td>RoleManager + threshold check</td></tr>
+<tr><td>Pause a token (registry)</td><td><code>EMERGENCY</code></td><td>RoleManager (2-of-2)</td></tr>
+<tr><td>Halt the engine entirely</td><td><code>EMERGENCY</code></td><td>RoleManager (2-of-2)</td></tr>
+<tr><td>Upgrade contract implementation</td><td><code>GOVERNOR</code></td><td>RoleManager + timelock</td></tr>
+</table>
+
+<p>The split between <code>GOVERNOR</code> (P2P) and <code>CURATOR</code> (AMINA) is intentional: P2P controls the infrastructure (upgrades, registry), AMINA controls the risk (KYB, parameters, liquidation). Neither party can unilaterally compromise the other's responsibility. The <code>EMERGENCY</code> role is jointly held so that a single party cannot freeze user funds.</p>
+
+<!-- ============================================================ -->
+<h2>8. Token integration — supply &amp; collateral tokens</h2>
+
+<p>Both Token A (collateral) and Token B (supply) are issued by regulated custodians. They are <em>not</em> plain ERC-20s — they carry their own KYC/KYB gating, typically via the ERC-3643 standard (T-REX, Tokeny's framework) or a custodian's proprietary allowlist.</p>
+
+<h3>How the contracts handle this</h3>
+
+<ol>
+<li><strong>No assumption of permissionless transferability.</strong> All token movement uses <code>SafeERC20</code> wrappers that bubble up the underlying compliance revert. If the custodian's allowlist rejects a transfer (e.g., the protocol vault is not on the allowlist for that token), the engine reverts and emits a structured event so off-chain operations can fix the allowlist out-of-band.</li>
+<li><strong>The vault must itself be allowlisted</strong> on every supply and collateral token. The launch checklist requires that for every <code>IssuerRegistry</code> entry, the custodian has added <code>EscrowVault</code> to the token's allowlist. <code>IssuerRegistry.activate(token)</code> can include an on-chain check (call <code>token.canTransfer(address(vault))</code>) where the ERC-3643 interface is available.</li>
+<li><strong>Pause propagation.</strong> If a custodian pauses a token at the issuer level, the protocol's <code>IssuerRegistry.paused</code> flag should be flipped to match. Existing deals already hold balances and can still be liquidated; new deals using the paused token are blocked.</li>
+</ol>
+
+<div class="note">
+<strong>Why not roll a custom ERC-20 wrapper here.</strong> Tempting, but the regulatory model fundamentally rests on the custodian's mint authority. Wrapping a Fireblocks- or AMINA-issued token in a protocol-owned wrapper would force the protocol to take on the redemption obligation — which is exactly what we are designed to avoid.
+</div>
+
+<!-- ============================================================ -->
+<h2>9. Privacy &amp; on-chain footprint</h2>
+
+<p>The brief's §5 emphasises that the chain layer should not leak counterparty identity. Three properties make this manageable:</p>
+
+<ol>
+<li><strong>One escrow vault, many deals.</strong> Lender X and borrower Y do not share an on-chain address other than the <code>dealId</code> entry, and that entry's only public link is to wallets which custody (not the chain) maps to legal entities.</li>
+<li><strong>Fresh-address discipline at the wallet layer.</strong> Custodians can mint Token A and Token B to a per-deal sub-account address. The wallet address itself becomes pseudonymous. The protocol does not need to know this is happening — it just sees ERC-20 transfers.</li>
+<li><strong>Deal terms that need not be public can be moved off-chain.</strong> <code>termsHash</code> binds the contract to an off-chain document; the on-chain row only needs the fields the engine actually computes against (principal, rate, maturity, collateral, parties). Pricing footnotes, side letters, etc. can live in the hashed packet.</li>
+</ol>
+
+<p>Stronger privacy (commitment-scheme based, ZK-friendly) is feasible but out of scope for v1. The architecture leaves it open: the engine reads from <code>DealRegistry</code> through an interface, and that interface could later be backed by a commitment-scheme deal store rather than the plain-storage version.</p>
+
+<!-- ============================================================ -->
+<h2>10. Upgradeability strategy</h2>
+
+<p>AAVE v4 makes Hubs immutable and Spokes upgradeable. We adopt a similar split, calibrated to the bilateral model:</p>
+
+<table>
+<tr><th>Contract</th><th>Upgradeable?</th><th>Why</th></tr>
+<tr><td><code>RoleManager</code> (OZ AM)</td><td>No</td><td>Standard, audited. Roles can be re-bound without redeploying.</td></tr>
+<tr><td><code>KYBGateway</code></td><td>UUPS</td><td>KYB policy evolves; schema may grow (e.g., tier flags).</td></tr>
+<tr><td><code>IssuerRegistry</code></td><td>UUPS</td><td>Schema may grow (e.g., per-issuer settlement-time fields).</td></tr>
+<tr><td><code>OracleRouter</code></td><td>UUPS</td><td>Composite-adapter shapes change as new tokens arrive.</td></tr>
+<tr><td><code>CollateralRegistry</code></td><td>UUPS</td><td>Versioning + new parameter fields.</td></tr>
+<tr><td><code>DealRegistry</code></td><td><strong>Immutable</strong></td><td>Append-only record of legal obligations. Migrating to a v2 deal record requires a new contract address and is itself a documented event.</td></tr>
+<tr><td><code>EscrowVault</code></td><td><strong>Immutable</strong></td><td>Custody of value — keep dead simple, never upgrade. Migration is via a one-way deal-by-deal evacuation.</td></tr>
+<tr><td><code>LendingEngine</code></td><td>UUPS (with timelock)</td><td>State machine may need to evolve; timelock + multisig protects users.</td></tr>
+<tr><td><code>LiquidationHandler</code></td><td>UUPS (with timelock)</td><td>Liquidation policy may evolve.</td></tr>
+<tr><td><code>SettlementRouter</code></td><td>UUPS</td><td>Event schema may grow.</td></tr>
+</table>
+
+<p>Immutability of <code>DealRegistry</code> and <code>EscrowVault</code> is the single strongest guarantee the protocol gives institutional counterparties: <em>the record of your loan and the location of your collateral cannot be silently rewritten by governance</em>. Upgrades to the engine cannot rewrite history or move tokens.</p>
+
+<!-- ============================================================ -->
+<h2>11. Failure modes and how the architecture absorbs them</h2>
+
+<table>
+<tr><th>Failure</th><th>What happens</th><th>Architectural absorber</th></tr>
+<tr><td>Oracle stale</td><td>HF computation reverts; no new deals; existing deals freeze in current state</td><td><code>OracleRouter</code> heartbeat check</td></tr>
+<tr><td>Custodian token paused</td><td>New deals using that token blocked; existing deals operate as long as token transfers succeed</td><td><code>IssuerRegistry.paused</code> flag</td></tr>
+<tr><td>Borrower wallet KYB revoked</td><td>Borrower cannot open new deals; existing deals can still be repaid (we don't want to trap funds); cannot top up</td><td><code>KYBGateway</code> with carve-out for repay</td></tr>
+<tr><td>AMINA liquidation bot offline</td><td>Borrower's HF stays unhealthy; loss accrues to AMINA per the licence agreement</td><td>None on-chain — AMINA's regulatory obligation</td></tr>
+<tr><td>AMINA refuses to liquidate (regulatory hold)</td><td>Engine state stays in Warned/Liquidating; nothing else happens until AMINA acts or governance halts</td><td>Halt switch on <code>LendingEngine</code> for emergency exit</td></tr>
+<tr><td>Smart-contract bug in <code>LendingEngine</code></td><td>Halt the engine. Use <code>EscrowVault</code>'s direct view functions to reconcile; redeploy engine; re-attach via a one-time migration ceremony in the new engine</td><td>Engine is upgradeable; vault is not</td></tr>
+<tr><td>Custodian insolvency</td><td>Outside protocol scope. Token holders fall back to bankruptcy claim on the custodian. Protocol freezes the issuer.</td><td><code>IssuerRegistry</code> deactivation</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>12. What this design does NOT include (deliberately)</h2>
+
+<table>
+<tr><th>Omitted feature</th><th>Why</th></tr>
+<tr><td>aTokens / cTokens / share tokens for suppliers</td><td>No pool, no shares to mint.</td></tr>
+<tr><td>Interest rate models / utilisation curves</td><td>Rates are fixed at deal creation by AMINA.</td></tr>
+<tr><td>Permissionless liquidation</td><td>AMINA is the regulated liquidator. Permissionless liquidation would invite MEV and break the regulatory model.</td></tr>
+<tr><td>Liquidation bonus / auction curves</td><td>No external liquidator economics to incentivise.</td></tr>
+<tr><td>Position Managers / delegated actions</td><td>v1 scope. Add when needed for institutional execution flows.</td></tr>
+<tr><td>Cross-chain (L2) deployment</td><td>Brief says Ethereum mainnet. Cross-chain adds bridges and signature replay surface.</td></tr>
+<tr><td>Protocol token / governance token</td><td>Out of scope. Governance is multisig + AccessManager.</td></tr>
+<tr><td>Flash loans</td><td>Bilateral fixed-term deals are not flashable. Adding flash loans requires a pool.</td></tr>
+<tr><td>Reinvestment / sweep of idle assets</td><td>The protocol holds collateral and short-lived supply transfers only. No idle balance to reinvest.</td></tr>
+<tr><td>Debt-obligation NFTs (Type B collateral from §14 of the brief)</td><td>Roadmap, not v1. The architecture leaves room: <code>CollateralRegistry</code> can accept ERC-721 entries in a v2 by extending the token-kind enum.</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>13. Audit surface estimate</h2>
+
+<p>For an external audit shop pricing the engagement:</p>
+
+<table>
+<tr><th>Concern</th><th>Risk class</th><th>Notes</th></tr>
+<tr><td>Reentrancy in <code>LendingEngine</code> ↔ <code>EscrowVault</code></td><td>Critical</td><td>Both sides use <code>ReentrancyGuard</code>; pull/push order disciplined. Standard pattern.</td></tr>
+<tr><td>EIP-712 signature replay across deals</td><td>Critical</td><td>Each <code>termsHash</code> includes a per-deal nonce and the deal's <code>dealId</code> in the typed-data domain.</td></tr>
+<tr><td>Permissioned-token transfer compliance reverts</td><td>High</td><td>Engine surfaces typed reverts; off-chain ops respond.</td></tr>
+<tr><td>Oracle manipulation / stale price</td><td>High</td><td>Heartbeat check + CAPO-style adapters for LBTC-like tokens.</td></tr>
+<tr><td>Liquidation step replay or skipped step</td><td>High</td><td>Monotonic <code>step</code> counter per deal.</td></tr>
+<tr><td>Storage collision on upgrade</td><td>Medium</td><td>Explicit <code>Storage</code> contracts per Compound v3 pattern.</td></tr>
+<tr><td>Rounding in interest accrual</td><td>Medium</td><td>Simple interest, integer math with explicit decimals; round in protocol's favour on repay, in borrower's favour on liquidation.</td></tr>
+<tr><td>Role-grant misconfiguration</td><td>Medium</td><td>OZ <code>AccessManager</code> + deployment checklist; bind multisig before bind-user.</td></tr>
+<tr><td>Custodian-side liveness</td><td>Out of scope</td><td>Handled by AMINA's licence and contractual obligations.</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>14. Extension paths (post-v1)</h2>
+
+<ol>
+<li><strong>Debt-obligation NFTs.</strong> Add ERC-721 collateral support in <code>CollateralRegistry</code> + a small token-kind extension. The engine treats them as zero-LTV collateral for HF purposes, with default flow handled off-chain via LCIA arbitration as the brief envisions.</li>
+<li><strong>RWA-backed deals.</strong> Already supported: tokenised treasuries (BUIDL, BENJI, USDY) are ERC-20 tokens issued by regulated custodians. Just add them to <code>IssuerRegistry</code> with the appropriate parameters.</li>
+<li><strong>DeFi liquidity channel.</strong> Wrap a basket of similar deals into a Mellow- or Morpho-style ERC-4626 vault that institutional retail can buy. The vault buys the supply side of many deals. Implementing this is purely <em>above</em> the engine — no engine change needed.</li>
+<li><strong>Per-counterparty bespoke escrow (Design A migration).</strong> Add a <code>DealEscrowFactory</code> that, when a CURATOR-flagged "bespoke" deal is recorded, deploys a minimal proxy. The engine's logic remains; the storage of certain deals just lives in a different physical address.</li>
+<li><strong>Stronger privacy.</strong> Replace <code>DealRegistry</code>'s plain-storage backend with a commitment-scheme variant. ZK-friendly construction. The engine's interface stays the same.</li>
+<li><strong>Cross-Spoke composability with AAVE.</strong> A custom AAVE v4 Vault Spoke could treat a P2PxAmina deal's lender position as collateral (deal note → AAVE), giving institutional lenders an exit ramp without breaking the bilateral model. Speculative.</li>
+</ol>
+
+<!-- ============================================================ -->
+<h2>15. Summary</h2>
+
+<p>The protocol described in the v0.7 brief is structurally close to a TradFi tri-party repo, not to AAVE or Compound. The right contract architecture acknowledges that:</p>
+
+<ul>
+<li>Use AAVE v4's <em>structural</em> lessons — separation of governance, registry, risk, and core engine; per-asset oracle isolation; emergency state semantics; dynamic risk versioning — without inheriting its pooled-economy machinery.</li>
+<li>Use Compound v3's <em>storage discipline</em> and the Configurator-as-factory pattern, without per-market deployments.</li>
+<li>Keep the core engine small (≈260 LOC) and the escrow trivial (≈140 LOC). Push complexity to the registries and to the off-chain layer where it belongs.</li>
+<li>Hold the immutability line on <code>DealRegistry</code> and <code>EscrowVault</code>; everything else is UUPS-upgradeable with timelock.</li>
+<li>The total Solidity footprint comes in at roughly 1,340 lines — inside the v0.7 budget, leaving headroom for libraries and the inevitable late-stage edge cases.</li>
+</ul>
+
+<div class="note-green note">
+<strong>One question the brief leaves open and the architecture resolves:</strong> who, on-chain, attests that a deal was matched under AMINA's brokerage licence? Answer: AMINA itself, via the third EIP-712 signature on <code>DealRegistry.recordDeal</code>. This makes the regulatory chain of custody verifiable on-chain without exposing the matching engine's internals.
+</div>
+
+<div style="margin-top:36px;padding-top:14px;border-top:1px solid #e5e5e7;font-size:12px;color:#86868b;text-align:center">
+Architecture proposal · companion to P2P Staking / AMINA Bank v0.7
+</div>
+
+</div>
+</body>
+</html>

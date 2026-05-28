@@ -1,0 +1,17 @@
+# Foundry build artifacts
+cache/
+out/
+broadcast/
+foundry.lock
+
+# Environment
+.env
+.env.*
+
+# Editor
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+test_logs/
