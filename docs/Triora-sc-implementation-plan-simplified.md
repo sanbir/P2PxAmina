@@ -52,7 +52,8 @@ flowchart TB
 
 - Contracts never custody real BTC, ETH, SOL, USDC, or bank money.
 - The onchain system is an institutional accounting and evidence layer.
-- AMINA performs KYB, credit terms, custody coordination, repayment confirmation, and liquidation decisions offchain.
+- AMINA performs KYB, credit terms, custody coordination, repayment confirmation, and liquidation operations offchain.
+- Chainlink oracle reports determine liquidation eligibility onchain.
 - Chainlink/issuer performs custody observation and mints cTokens.
 - Settlement is not considered complete when a match is opened. Interest starts only after AMINA confirms funding.
 - v1 supports full repayment and full liquidation only.
@@ -183,7 +184,7 @@ Non-responsibilities:
 - No automated matching.
 - No onchain custody adapter.
 - No onchain custody proof parser.
-- No oracle.
+- No continuous oracle health factor. The only oracle logic is liquidation-time Chainlink report verification.
 - No LTV, margin call, or health factor.
 - No partial repayment.
 - No collateral top-up.
@@ -200,9 +201,11 @@ stateDiagram-v2
     Active --> RepaymentRequested: borrower requestRepayment
     RepaymentRequested --> ReleasePending: AMINA confirmRepayment
     ReleasePending --> Closed: AMINA confirmCollateralReleased
-    Active --> LiquidationPending: AMINA requestLiquidation
-    RepaymentRequested --> LiquidationPending: AMINA requestLiquidation
-    LiquidationPending --> Liquidated: AMINA confirmLiquidation
+    Active --> LiquidationPending: AMINA requestLiquidation + Chainlink report
+    RepaymentRequested --> LiquidationPending: AMINA requestLiquidation + Chainlink report
+    LiquidationPending --> Liquidated: after 24h + fresh Chainlink report
+    LiquidationPending --> Active: anyone cancelPendingLiquidation after 24h
+    LiquidationPending --> RepaymentRequested: anyone cancelPendingLiquidation after 24h
 ```
 
 Planned data model:
@@ -256,6 +259,28 @@ struct Deal {
     bytes32 lenderSettlementRef;
     bytes32 aminaLiquidationRef;
 }
+
+struct LiquidationOracleReport {
+    bytes32 dealId;
+    bytes32 legalTermsHash;
+    address collateralToken;
+    address principalToken;
+    uint256 debtValue;
+    uint256 collateralValue;
+    uint32 liquidationThresholdBps;
+    uint64 observedAt;
+    uint64 expiresAt;
+    bytes32 reportRef;
+}
+
+struct PendingLiquidation {
+    DealState previousState;
+    uint64 requestedAt;
+    bytes32 initialReportRef;
+    uint256 initialDebtValue;
+    uint256 initialCollateralValue;
+    uint32 liquidationThresholdBps;
+}
 ```
 
 Admission and lifecycle:
@@ -293,19 +318,23 @@ Liquidation:
 
 ```mermaid
 flowchart TD
-    A[Active or RepaymentRequested] --> B[AMINA requestLiquidation]
-    B --> C[LiquidationPending]
-    C --> D[emit LiquidationInstruction]
-    D --> E[AMINA confirms liquidation settlement]
-    E --> F[burn locked collateral cToken]
-    F --> G[return locked cUSDC/principal token to lender]
-    G --> H[Liquidated]
+    A[Active or RepaymentRequested] --> B[Chainlink signed report proves threshold breach]
+    B --> C[AMINA requestLiquidation]
+    C --> D[LiquidationPending]
+    D --> E[24h cure window]
+    E --> F{AMINA has fresh Chainlink report?}
+    F -- yes --> G[finalizeLiquidation]
+    G --> H[burn locked collateral cToken]
+    H --> I[return locked cUSDC/principal token to lender]
+    I --> J[Liquidated]
+    F -- no --> K[anyone cancelPendingLiquidation]
+    K --> L[restore previous state]
 ```
 
 Planned interface:
 
 ```solidity
-constructor(address amina_)
+constructor(address amina_, address chainlinkOracle_)
 
 function setApproved(address account, bool isApproved, bytes32 evidenceRef) external onlyAmina;
 function openDeal(OpenDealParams calldata p) external onlyAmina returns (bytes32 dealId);
@@ -315,10 +344,22 @@ function outstanding(bytes32 dealId) public view returns (uint256);
 function requestRepayment(bytes32 dealId) external returns (uint256 repayQuote);
 function confirmRepayment(bytes32 dealId, bytes32 settlementRef) external onlyAmina;
 function confirmCollateralReleased(bytes32 dealId, bytes32 releaseRef) external onlyAmina;
-function requestLiquidation(bytes32 dealId, bytes32 reasonRef) external onlyAmina;
-function confirmLiquidation(bytes32 dealId, bytes32 settlementRef) external onlyAmina;
+function requestLiquidation(
+    bytes32 dealId,
+    LiquidationOracleReport calldata report,
+    bytes calldata signature
+) external onlyAmina;
+function finalizeLiquidation(
+    bytes32 dealId,
+    LiquidationOracleReport calldata report,
+    bytes calldata signature,
+    bytes32 settlementRef
+) external onlyAmina;
+function cancelPendingLiquidation(bytes32 dealId, bytes32 reasonRef) external;
 function getDeal(bytes32 dealId) external view returns (Deal memory);
+function getPendingLiquidation(bytes32 dealId) external view returns (PendingLiquidation memory);
 function stateOf(bytes32 dealId) external view returns (DealState);
+function hashLiquidationReport(LiquidationOracleReport calldata report) external view returns (bytes32);
 ```
 
 Events:
@@ -332,8 +373,9 @@ Events:
 - `RepaymentConfirmed(bytes32 dealId, bytes32 settlementRef, uint256 amount)`
 - `CollateralReleaseInstruction(bytes32 dealId, bytes32 collateralRef, bytes32 borrowerReleaseRef, uint256 amount)`
 - `CollateralReleased(bytes32 dealId, bytes32 releaseRef)`
-- `LiquidationInstruction(bytes32 dealId, bytes32 collateralRef, bytes32 aminaLiquidationRef, uint256 amount, bytes32 reasonRef)`
-- `LiquidationConfirmed(bytes32 dealId, bytes32 settlementRef)`
+- `LiquidationInstruction(bytes32 dealId, bytes32 collateralRef, bytes32 aminaLiquidationRef, uint256 amount, bytes32 reportRef, uint64 cureDeadline)`
+- `LiquidationFinalized(bytes32 dealId, bytes32 settlementRef, bytes32 reportRef)`
+- `LiquidationCancelled(bytes32 dealId, address caller, bytes32 reasonRef)`
 
 ## Interest Model
 
@@ -363,11 +405,12 @@ differences stay in AMINA's offchain statement and legal terms for v1.
 
 ## Access Control
 
-Only two privileged identities exist:
+Only three privileged identities exist:
 
 ```mermaid
 flowchart LR
     Issuer[Chainlink/Issuer] -->|mint| Token[TrioraAccountToken]
+    Oracle[Chainlink oracle signer] -->|sign liquidation reports| Engine[TrioraLendingSimple]
     Owner[Token owner] -->|one-time setEngine| Token
     Amina[AMINA] -->|operate loans| Engine[TrioraLendingSimple]
     Engine -->|pull/return/burn locked balances| Token
@@ -378,7 +421,7 @@ This avoids:
 - AccessManager configuration errors.
 - Role graph drift.
 - Separate acker/liquidator/router permissioning.
-- Signature-domain and nonce mistakes.
+- Borrower/lender signature-domain and nonce mistakes.
 - Upgrade admin complexity.
 
 ## Test Plan
@@ -407,8 +450,12 @@ Required tests:
 
 3. Liquidation:
    - AMINA funds an active deal;
-   - AMINA requests liquidation;
-   - AMINA confirms liquidation settlement;
+   - AMINA requests liquidation with a Chainlink-signed report proving the threshold breach;
+   - finalization before the 24-hour cure window reverts;
+   - AMINA finalizes only with a fresh Chainlink-signed report observed after the cure window;
+   - healthy reports are rejected;
+   - wrong-signature reports are rejected;
+   - anyone can cancel after the cure window if AMINA has not finalized;
    - collateral token is burned;
    - principal token is returned to lender;
    - state becomes `Liquidated`.
@@ -418,7 +465,8 @@ Required tests:
    - user-to-engine and engine-to-user transfers are allowed through loan flows.
 
 5. Authorization:
-   - non-AMINA cannot approve entities, open deals, confirm funding, cancel, confirm repayment, release, or liquidate.
+   - non-AMINA cannot approve entities, open deals, confirm funding, cancel unfunded deals, confirm repayment, release collateral, request liquidation, or finalize liquidation.
+   - anyone can cancel pending liquidation after the 24-hour cure window.
    - non-issuer cannot mint.
    - non-engine cannot burn locked balances.
 
@@ -463,8 +511,9 @@ flowchart TD
     K[TrioraLendingSimple.requestRepayment] --> L[Quote snapshot]
     M[TrioraLendingSimple.confirmRepayment] --> N[Principal token return]
     O[TrioraLendingSimple.confirmCollateralReleased] --> P[Collateral token burn]
-    Q[TrioraLendingSimple.requestLiquidation] --> R[Liquidation state]
-    S[TrioraLendingSimple.confirmLiquidation] --> T[Burn collateral + return principal token]
+    Q[TrioraLendingSimple.requestLiquidation] --> R[Chainlink report + pending state]
+    S[TrioraLendingSimple.finalizeLiquidation] --> T[Fresh report + burn collateral + return principal token]
+    U[TrioraLendingSimple.cancelPendingLiquidation] --> V[Anyone cancel after cure window]
 ```
 
 The primary risks to review are:
@@ -472,6 +521,8 @@ The primary risks to review are:
 - whether accounting tokens can be moved outside intended escrow paths;
 - whether tokens can become stuck in non-terminal states;
 - whether repayment, release, or liquidation can be confirmed by the wrong actor;
+- whether liquidation can occur without valid fresh Chainlink reports;
+- whether the 24-hour cure window can be bypassed;
 - whether interest starts before real funding;
 - whether AMINA operational references are emitted and stored consistently.
 
@@ -480,7 +531,7 @@ The primary risks to review are:
 The following features are out of scope for this simplified implementation:
 
 - BitGo API proof parsing or onchain custody account registry;
-- Chainlink OCR/Functions report verification;
+- full Chainlink OCR/Functions DON aggregation internals; simplified v1 verifies signed liquidation reports only;
 - ERC-3643/CMTAT-style full compliance token;
 - `AccessManager` role matrix;
 - borrower/lender EIP-712 signatures;

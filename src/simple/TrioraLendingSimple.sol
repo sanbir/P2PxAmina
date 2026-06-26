@@ -3,6 +3,8 @@ pragma solidity 0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
@@ -10,10 +12,14 @@ import {TrioraAccountToken} from "./TrioraAccountToken.sol";
 
 /// @title TrioraLendingSimple
 /// @notice Minimal AMINA-operated loan state machine for custody-backed accounting tokens.
-contract TrioraLendingSimple is ReentrancyGuard {
+contract TrioraLendingSimple is EIP712, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 private constant YEAR = 365 days;
+    uint64 public constant LIQUIDATION_DELAY = 24 hours;
+    bytes32 public constant LIQUIDATION_ORACLE_REPORT_TYPEHASH = keccak256(
+        "LiquidationOracleReport(bytes32 dealId,bytes32 legalTermsHash,address collateralToken,address principalToken,uint256 debtValue,uint256 collateralValue,uint32 liquidationThresholdBps,uint64 observedAt,uint64 expiresAt,bytes32 reportRef)"
+    );
 
     enum DealState {
         None,
@@ -64,11 +70,35 @@ contract TrioraLendingSimple is ReentrancyGuard {
         bytes32 aminaLiquidationRef;
     }
 
+    struct LiquidationOracleReport {
+        bytes32 dealId;
+        bytes32 legalTermsHash;
+        address collateralToken;
+        address principalToken;
+        uint256 debtValue;
+        uint256 collateralValue;
+        uint32 liquidationThresholdBps;
+        uint64 observedAt;
+        uint64 expiresAt;
+        bytes32 reportRef;
+    }
+
+    struct PendingLiquidation {
+        DealState previousState;
+        uint64 requestedAt;
+        bytes32 initialReportRef;
+        uint256 initialDebtValue;
+        uint256 initialCollateralValue;
+        uint32 liquidationThresholdBps;
+    }
+
     address public immutable amina;
+    address public immutable chainlinkOracle;
     uint256 public dealNonce;
 
     mapping(address account => bool isApproved) public approved;
     mapping(bytes32 dealId => Deal deal) private _deals;
+    mapping(bytes32 dealId => PendingLiquidation pending) private _pendingLiquidations;
 
     event EntityApproved(address indexed account, bool approved, bytes32 indexed evidenceRef);
     event DealOpened(
@@ -102,9 +132,11 @@ contract TrioraLendingSimple is ReentrancyGuard {
         bytes32 indexed collateralRef,
         bytes32 indexed aminaLiquidationRef,
         uint256 amount,
-        bytes32 reasonRef
+        bytes32 reportRef,
+        uint64 cureDeadline
     );
-    event LiquidationConfirmed(bytes32 indexed dealId, bytes32 indexed settlementRef);
+    event LiquidationFinalized(bytes32 indexed dealId, bytes32 indexed settlementRef, bytes32 indexed reportRef);
+    event LiquidationCancelled(bytes32 indexed dealId, address indexed caller, bytes32 indexed reasonRef);
 
     error ZeroAddress();
     error ZeroAmount();
@@ -115,10 +147,14 @@ contract TrioraLendingSimple is ReentrancyGuard {
     error DealAlreadyExists(bytes32 dealId);
     error BadState(bytes32 dealId, DealState actual);
     error BadParams(bytes32 reason);
+    error InvalidOracleSigner(address recovered);
+    error InvalidOracleReport(bytes32 reportRef, bytes32 reason);
+    error LiquidationDelayLive(bytes32 dealId, uint64 cureDeadline);
 
-    constructor(address amina_) {
-        if (amina_ == address(0)) revert ZeroAddress();
+    constructor(address amina_, address chainlinkOracle_) EIP712("TrioraLendingSimple", "1") {
+        if (amina_ == address(0) || chainlinkOracle_ == address(0)) revert ZeroAddress();
         amina = amina_;
+        chainlinkOracle = chainlinkOracle_;
     }
 
     modifier onlyAmina() {
@@ -246,37 +282,88 @@ contract TrioraLendingSimple is ReentrancyGuard {
         emit CollateralReleased(dealId, releaseRef);
     }
 
-    function requestLiquidation(bytes32 dealId, bytes32 reasonRef) external onlyAmina {
-        _requireRef(reasonRef);
+    function requestLiquidation(bytes32 dealId, LiquidationOracleReport calldata report, bytes calldata signature)
+        external
+        onlyAmina
+    {
         Deal storage deal = _requireDeal(dealId);
         if (deal.state != DealState.Active && deal.state != DealState.RepaymentRequested) {
             revert BadState(dealId, deal.state);
         }
+        _verifyLiquidationReport(dealId, deal, report, signature);
 
+        DealState previousState = deal.state;
+        uint64 requestedAt = _now64();
+        uint64 cureDeadline = requestedAt + LIQUIDATION_DELAY;
         deal.state = DealState.LiquidationPending;
+        _pendingLiquidations[dealId] = PendingLiquidation({
+            previousState: previousState,
+            requestedAt: requestedAt,
+            initialReportRef: report.reportRef,
+            initialDebtValue: report.debtValue,
+            initialCollateralValue: report.collateralValue,
+            liquidationThresholdBps: report.liquidationThresholdBps
+        });
+
         emit LiquidationInstruction(
-            dealId, deal.collateralRef, deal.aminaLiquidationRef, deal.collateralAmount, reasonRef
+            dealId, deal.collateralRef, deal.aminaLiquidationRef, deal.collateralAmount, report.reportRef, cureDeadline
         );
     }
 
-    function confirmLiquidation(bytes32 dealId, bytes32 settlementRef) external onlyAmina nonReentrant {
+    function finalizeLiquidation(
+        bytes32 dealId,
+        LiquidationOracleReport calldata report,
+        bytes calldata signature,
+        bytes32 settlementRef
+    ) external onlyAmina nonReentrant {
         _requireRef(settlementRef);
         Deal storage deal = _requireDeal(dealId);
         _requireState(dealId, deal, DealState.LiquidationPending);
+        PendingLiquidation memory pending = _pendingLiquidations[dealId];
+        uint64 cureDeadline = pending.requestedAt + LIQUIDATION_DELAY;
+        if (block.timestamp < cureDeadline) revert LiquidationDelayLive(dealId, cureDeadline);
+        if (report.observedAt < cureDeadline) revert InvalidOracleReport(report.reportRef, bytes32("EARLY_FINAL"));
+        if (report.reportRef == pending.initialReportRef) {
+            revert InvalidOracleReport(report.reportRef, bytes32("REUSED"));
+        }
+        _verifyLiquidationReport(dealId, deal, report, signature);
 
         deal.state = DealState.Liquidated;
+        delete _pendingLiquidations[dealId];
         deal.collateralToken.burnLocked(deal.collateralAmount, settlementRef);
         IERC20(address(deal.principalToken)).safeTransfer(deal.lender, deal.principalAmount);
 
-        emit LiquidationConfirmed(dealId, settlementRef);
+        emit LiquidationFinalized(dealId, settlementRef, report.reportRef);
+    }
+
+    function cancelPendingLiquidation(bytes32 dealId, bytes32 reasonRef) external {
+        _requireRef(reasonRef);
+        Deal storage deal = _requireDeal(dealId);
+        _requireState(dealId, deal, DealState.LiquidationPending);
+        PendingLiquidation memory pending = _pendingLiquidations[dealId];
+        uint64 cureDeadline = pending.requestedAt + LIQUIDATION_DELAY;
+        if (block.timestamp < cureDeadline) revert LiquidationDelayLive(dealId, cureDeadline);
+
+        deal.state = pending.previousState;
+        delete _pendingLiquidations[dealId];
+
+        emit LiquidationCancelled(dealId, msg.sender, reasonRef);
     }
 
     function getDeal(bytes32 dealId) external view returns (Deal memory) {
         return _requireDeal(dealId);
     }
 
+    function getPendingLiquidation(bytes32 dealId) external view returns (PendingLiquidation memory) {
+        return _pendingLiquidations[dealId];
+    }
+
     function stateOf(bytes32 dealId) external view returns (DealState) {
         return _deals[dealId].state;
+    }
+
+    function hashLiquidationReport(LiquidationOracleReport calldata report) external view returns (bytes32) {
+        return _hashLiquidationReport(report);
     }
 
     function _validateOpenDeal(OpenDealParams calldata p) private view {
@@ -311,6 +398,67 @@ contract TrioraLendingSimple is ReentrancyGuard {
 
     function _requireRef(bytes32 ref) private pure {
         if (ref == bytes32(0)) revert BadParams(bytes32("REF"));
+    }
+
+    function _verifyLiquidationReport(
+        bytes32 dealId,
+        Deal storage deal,
+        LiquidationOracleReport calldata report,
+        bytes calldata signature
+    ) private view {
+        _validateLiquidationReport(dealId, deal, report);
+
+        address recovered = ECDSA.recover(_hashLiquidationReport(report), signature);
+        if (recovered != chainlinkOracle) revert InvalidOracleSigner(recovered);
+    }
+
+    function _validateLiquidationReport(bytes32 dealId, Deal storage deal, LiquidationOracleReport calldata report)
+        private
+        view
+    {
+        if (report.reportRef == bytes32(0)) revert InvalidOracleReport(report.reportRef, bytes32("REF"));
+        if (
+            report.dealId != dealId || report.legalTermsHash != deal.legalTermsHash
+                || report.collateralToken != address(deal.collateralToken)
+                || report.principalToken != address(deal.principalToken)
+        ) {
+            revert InvalidOracleReport(report.reportRef, bytes32("MATCH"));
+        }
+        if (report.observedAt == 0 || report.observedAt > block.timestamp) {
+            revert InvalidOracleReport(report.reportRef, bytes32("OBSERVED_AT"));
+        }
+        if (report.expiresAt < block.timestamp || report.expiresAt <= report.observedAt) {
+            revert InvalidOracleReport(report.reportRef, bytes32("EXPIRED"));
+        }
+        if (
+            report.debtValue == 0 || report.collateralValue == 0 || report.liquidationThresholdBps == 0
+                || report.liquidationThresholdBps > 10000
+        ) {
+            revert InvalidOracleReport(report.reportRef, bytes32("VALUES"));
+        }
+        if (Math.mulDiv(report.debtValue, 10000, report.collateralValue) < report.liquidationThresholdBps) {
+            revert InvalidOracleReport(report.reportRef, bytes32("HEALTHY"));
+        }
+    }
+
+    function _hashLiquidationReport(LiquidationOracleReport calldata report) private view returns (bytes32) {
+        return _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    LIQUIDATION_ORACLE_REPORT_TYPEHASH,
+                    report.dealId,
+                    report.legalTermsHash,
+                    report.collateralToken,
+                    report.principalToken,
+                    report.debtValue,
+                    report.collateralValue,
+                    report.liquidationThresholdBps,
+                    report.observedAt,
+                    report.expiresAt,
+                    report.reportRef
+                )
+            )
+        );
     }
 
     function _computedOutstanding(Deal storage deal) private view returns (uint256) {

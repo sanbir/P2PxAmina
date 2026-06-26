@@ -14,7 +14,7 @@ The minimum useful onchain system is:
 
 1. Two or more restricted accounting ERC-20 tokens, such as `cBTC`, `cETH`, and `cUSDC`.
 2. One lending state-machine contract.
-3. AMINA as the only onchain actor allowed to approve entities, open matched deals, confirm funding, confirm repayment, and confirm liquidation.
+3. AMINA as the only onchain actor allowed to approve entities, open matched deals, confirm funding, confirm repayment, and operate liquidation after Chainlink proves eligibility.
 4. Chainlink CRE or another issuer address as the only minter of accounting tokens.
 5. Events as the settlement instruction and audit trail.
 
@@ -38,7 +38,7 @@ The simplified architecture does less, but it does the right things:
 | Tokenize collateral once, borrow many times | Chainlink/issuer mints `cBTC`/`cETH`; borrower can approve tokens into deals. |
 | Tokenize USDC to lend | Chainlink/issuer mints `cUSDC`; lender can approve tokens into deals. |
 | Real funds stay in custody | Contracts only move accounting ERC-20s. |
-| AMINA is broker/collateral agent/liquidator | AMINA is the only settlement and lifecycle authority. |
+| AMINA is broker/collateral agent/liquidator | AMINA is the only settlement and lifecycle operator; Chainlink gates liquidation eligibility. |
 | P2P is technology provider | No privileged P2P role in the minimal contracts. |
 | Chainlink CRE issues tokens | Token `mint` is issuer-only; lending contract cannot mint. |
 | Matched does not mean funded | Deal starts as `SettlementPending`. |
@@ -63,7 +63,7 @@ The simplification is intentionally severe.
 | `SettlementRouter` | The engine emits settlement instruction events directly. |
 | `SettlementAcker` | AMINA calls confirmation functions directly. |
 | `ReleaseAuthorizer` | Release destination is stored in deal terms and emitted by the engine. |
-| `LiquidationHandler` | AMINA decides liquidation offchain and calls the engine. |
+| `LiquidationHandler` | The engine verifies Chainlink liquidation reports directly; no separate handler. |
 | Onchain price oracle | AMINA risk desk can use prices offchain for v1. |
 | Health-factor math onchain | Nice for transparency, but not required to enforce custody settlement. |
 | Warning state | The 48-hour warning can be offchain notice in v1. |
@@ -137,7 +137,8 @@ flowchart TB
     Issuer -->|mint cUSDC| cUSDC
     Borrower -->|approve cBTC| Engine
     Lender -->|approve cUSDC| Engine
-    Amina -->|open/confirm/liquidate| Engine
+    Amina -->|open/confirm/operate liquidation| Engine
+    Chainlink[Chainlink oracle] -->|signed liquidation reports| Engine
     Engine -->|escrow accounting tokens| cBTC
     Engine -->|escrow accounting tokens| cUSDC
     Engine -->|events| Custodian
@@ -190,9 +191,11 @@ stateDiagram-v2
     Active --> RepaymentRequested: borrower requests full repayment quote
     RepaymentRequested --> ReleasePending: AMINA confirms repayment
     ReleasePending --> Closed: AMINA confirms collateral release
-    Active --> LiquidationPending: AMINA requests liquidation
-    RepaymentRequested --> LiquidationPending: AMINA requests liquidation
-    LiquidationPending --> Liquidated: AMINA confirms liquidation settlement
+    Active --> LiquidationPending: AMINA + Chainlink report
+    RepaymentRequested --> LiquidationPending: AMINA + Chainlink report
+    LiquidationPending --> Liquidated: after 24h + fresh Chainlink report
+    LiquidationPending --> Active: anyone cancels after 24h
+    LiquidationPending --> RepaymentRequested: anyone cancels after 24h
 ```
 
 ## Lifecycle Details
@@ -259,15 +262,23 @@ The contract burns the locked `cBTC/cETH` and closes the deal.
 
 ### 6. Liquidation
 
-AMINA may move a funded deal to `LiquidationPending`.
+AMINA may request liquidation only with a Chainlink-signed liquidation oracle report.
 
-This is intentionally not automated in v1. AMINA's risk desk is the regulated decision maker, and warning, price checks, grace periods, and custody outages are operational processes.
+The report must bind to the deal, legal terms hash, collateral token, principal token, debt value, collateral value,
+liquidation threshold, observation time, expiry, and report reference. The engine verifies the signature and threshold
+breach before moving to `LiquidationPending`.
 
-After AMINA confirms liquidation settlement:
+A fixed 24-hour cure window then starts. AMINA can finalize only after the window and only with a second fresh
+Chainlink-signed report proving that liquidation conditions are still met. If AMINA does not finalize after the window,
+anyone can cancel the pending liquidation and restore the previous state.
+
+After AMINA finalizes liquidation:
 
 - locked collateral token is burned;
 - locked `cUSDC` is returned to the lender as settled accounting;
 - deal becomes `Liquidated`.
+
+See `Triora-liquidation-ADR.md` for the full decision.
 
 ## Sequence Diagram
 
@@ -277,6 +288,7 @@ sequenceDiagram
     participant Lender
     participant Issuer as Chainlink/Issuer
     participant Amina as AMINA
+    participant Oracle as Chainlink Oracle
     participant TokenC as cBTC/cETH
     participant TokenU as cUSDC
     participant Engine as TrioraLendingSimple
@@ -300,6 +312,12 @@ sequenceDiagram
     Engine-->>Custody: CollateralReleaseInstruction event
     Amina->>Engine: confirmCollateralReleased
     Engine->>TokenC: burn locked collateral token
+
+    Oracle-->>Amina: signed liquidation report if unhealthy
+    Amina->>Engine: requestLiquidation(report)
+    Engine-->>Engine: verify report and start 24h cure window
+    Oracle-->>Amina: fresh signed report after 24h
+    Amina->>Engine: finalizeLiquidation(fresh report)
 ```
 
 ## What The UI Can Still Show
@@ -315,10 +333,11 @@ The UI mockup remains supportable:
 | Deal state | `stateOf(id)` |
 | Current repayment amount | `outstanding(id)` |
 | Settlement pending | `SettlementPending` state |
-| Liquidation pending | `LiquidationPending` state |
+| Liquidation pending | `LiquidationPending` state and pending liquidation report refs |
 | Closed/liquidated history | terminal state events |
 
-The UI loses only v2-nice-to-have views: reserve evidence lens, full pledge registry view, oracle health factor, partial repayment progress, and loan token secondary-market flows.
+The UI loses only v2-nice-to-have views: reserve evidence lens, full pledge registry view, continuous oracle health
+factor, partial repayment progress, and loan token secondary-market flows.
 
 ## Security Simplification
 
@@ -328,7 +347,7 @@ The smaller surface removes most footguns.
 flowchart TD
     Less[Smaller v1 surface]
     NoAdapters[No adapter parsing]
-    NoOracle[No oracle math]
+    MinimalOracle[Only liquidation report verification]
     NoGenericMint[No protocol minting]
     NoForcedTransfer[No forced transfer]
     NoPartial[No partial repayments]
@@ -336,7 +355,7 @@ flowchart TD
     EasierAudit[Easier audit]
 
     Less --> NoAdapters
-    Less --> NoOracle
+    Less --> MinimalOracle
     Less --> NoGenericMint
     Less --> NoForcedTransfer
     Less --> NoPartial
@@ -353,7 +372,7 @@ Main remaining trust assumptions:
 
 - issuer mints only after custody evidence;
 - AMINA calls confirmations only after real custody settlement;
-- AMINA risk desk handles margin warnings and liquidation decisions offchain;
+- AMINA risk desk handles margin warnings offchain, while liquidation eligibility is proven by Chainlink reports;
 - the custodian honors control agreements.
 
 Those are exactly the institutional trust assumptions Triora already has. The simplified contracts stop pretending to automate what is legally and operationally offchain in v1.
@@ -396,4 +415,4 @@ flowchart LR
 
 The whole v1 contract system should be easy to explain in one sentence:
 
-> Chainlink mints restricted accounting tokens after custody checks; AMINA opens and settles deals; one contract escrows the accounting tokens, records the loan state, emits custody instructions, and burns collateral tokens when AMINA confirms release or liquidation.
+> Chainlink mints restricted accounting tokens after custody checks; AMINA opens and settles deals; one contract escrows the accounting tokens, records the loan state, emits custody instructions, and burns collateral tokens on release or Chainlink-gated liquidation finalization.
