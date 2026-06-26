@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<!-- saved from url=(0050)https://vladismint-docs.up.railway.app/triora.html -->
+<html lang="ru"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Triora — Как работает протокол</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Archivo:wght@400;500;600;700&display=swap');
+
+:root{
+  --teal:#003d4c;
+  --teal-soft:#3d6b78;
+  --ink:#13262b;
+  --muted:#6a7c81;
+  --faint:#9aabae;
+  --line:#e2e9ea;
+  --line-strong:#cdd8da;
+  --bg:#f4f6f6;
+  --card:#ffffff;
+  --accent:#1f7a5a;        /* single semantic green — AMINA / safe */
+  --accent-soft:#eef4f1;
+  --warn:#9a5a2a;
+  --warn-soft:#f6efe7;
+  /* flow colors used ONLY inside the diagram, where color carries meaning */
+  --flow-usdc:#2775ca;
+  --flow-token:#7d949a;
+  --flow-cl:#375bd2;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:'Archivo',system-ui,sans-serif;
+  background:var(--bg);
+  color:var(--ink);
+  -webkit-font-smoothing:antialiased;
+  line-height:1.6;
+  padding:56px 24px 96px;
+}
+.wrap{max-width:920px;margin:0 auto;position:relative}
+
+/* language switch */
+.langsw{position:absolute;top:-18px;right:0;display:inline-flex;border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;background:var(--card)}
+.langsw button{border:none;background:transparent;font:inherit;font-size:12px;font-weight:600;letter-spacing:.03em;padding:6px 13px;cursor:pointer;color:var(--muted);transition:.12s}
+.langsw button.on{background:var(--teal);color:#fff}
+.langsw button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+@media (max-width:520px){.langsw{position:static;margin-bottom:20px}}
+
+/* header */
+.brand{display:flex;align-items:baseline;gap:13px;flex-wrap:wrap;margin-bottom:5px}
+.logo{font-family:'Fraunces',serif;font-size:32px;font-weight:600;color:var(--teal);letter-spacing:-.015em}
+.logo .dot{color:var(--accent)}
+.tag{font-size:12.5px;color:var(--muted)}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--faint);font-weight:600;margin-bottom:14px}
+.intro{font-size:15px;color:var(--muted);max-width:640px;line-height:1.7}
+
+/* section heading — quiet numbering */
+h2{font-family:'Fraunces',serif;font-size:21px;font-weight:600;color:var(--teal);letter-spacing:-.01em;margin:64px 0 4px;display:flex;align-items:baseline;gap:11px}
+h2 .n{font-family:'Archivo';font-size:12px;font-weight:700;color:var(--faint);min-width:20px}
+.sub{font-size:13.5px;color:var(--muted);margin:0 0 22px 31px;max-width:600px;line-height:1.65}
+
+/* unified card grid */
+.grid{display:grid;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.grid-4{grid-template-columns:repeat(4,1fr)}
+.grid-2{grid-template-columns:1fr 1fr}
+.grid-3{grid-template-columns:repeat(3,1fr)}
+.cell{background:var(--card);padding:20px}
+
+/* role cell */
+.cell .ch{display:flex;align-items:baseline;gap:7px;margin-bottom:3px}
+.cell h3{font-family:'Fraunces',serif;font-size:15.5px;color:var(--teal);font-weight:600}
+.cell .role-tag{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:13px}
+.cell ul{list-style:none;font-size:12.5px;color:var(--ink)}
+.cell li{padding:7px 0 7px 15px;position:relative;border-top:1px solid var(--line)}
+.cell li:first-child{border-top:none}
+.cell li::before{content:"";position:absolute;left:0;top:14px;width:4px;height:4px;border-radius:50%;background:var(--line-strong)}
+
+/* layer / capability cell text */
+.cell .lead-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint);font-weight:600;margin-bottom:9px}
+.cell h4{font-family:'Fraunces',serif;font-size:16px;color:var(--teal);margin-bottom:9px;font-weight:600;line-height:1.25}
+.cell p{font-size:13px;color:var(--muted);line-height:1.6}
+.cell p+p{margin-top:9px}
+.cell p b{color:var(--ink);font-weight:600}
+
+/* token cell */
+.tk{font-family:'Archivo';font-size:11px;font-weight:700;letter-spacing:.02em;color:var(--teal);background:var(--bg);border:1px solid var(--line-strong);padding:3px 8px;border-radius:6px;margin-bottom:11px;display:inline-block}
+.cell .why{font-size:12.5px;color:var(--ink);margin-top:11px;padding-top:11px;border-top:1px solid var(--line);line-height:1.6}
+.cell .why b{color:var(--teal);font-weight:600}
+
+/* diagram — the one signature element */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+svg{display:block;width:100%;height:auto}
+.legend{display:flex;gap:24px;flex-wrap:wrap;margin-top:14px;font-size:11.5px;color:var(--muted)}
+.legend .it{display:flex;align-items:center;gap:7px}
+.swatch{width:20px;height:0;border-top-width:2.5px;border-top-style:solid}
+
+/* steps — quiet list, not heavy cards */
+.steps{display:grid;gap:0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.step{background:var(--card);padding:16px 20px 16px 52px;position:relative;border-top:1px solid var(--line)}
+.step:first-child{border-top:none}
+.step .sn{position:absolute;left:20px;top:16px;font-family:'Fraunces',serif;font-size:14px;font-weight:600;color:var(--faint)}
+.step.key{background:var(--accent-soft)}
+.step h4{font-size:13.5px;color:var(--teal);margin-bottom:2px;font-weight:700;display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.step.key h4{color:var(--accent)}
+.step p{font-size:12.5px;color:var(--muted);line-height:1.6}
+.who{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)}
+.step.key .who{color:var(--accent)}
+
+/* risk table — flat, monochrome with one accent dot */
+.ltable{width:100%;border-collapse:collapse;font-size:12.5px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.ltable th{text-align:left;background:var(--bg);color:var(--teal);font-weight:600;padding:11px 16px;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line)}
+.ltable td{padding:13px 16px;border-top:1px solid var(--line);vertical-align:top;color:var(--muted);background:var(--card)}
+.ltable tr td:first-child{font-weight:600;white-space:nowrap;color:var(--ink)}
+.ltable tr td:nth-child(2){white-space:nowrap}
+.bears{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--ink)}
+.bears::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.bears.none::before{background:var(--line-strong)}
+.bears.rep::before{background:var(--warn)}
+
+/* notes */
+.note{font-size:12.5px;color:var(--muted);background:var(--card);border:1px solid var(--line);border-left:3px solid var(--line-strong);padding:14px 16px;border-radius:8px;margin-top:18px;max-width:760px;line-height:1.65}
+.note b{color:var(--teal)}
+.note.accent{border-left-color:var(--accent)}.note.accent b{color:var(--accent)}
+.note.warn{border-left-color:var(--warn);background:var(--warn-soft)}.note.warn b{color:var(--warn)}
+
+.foot{margin-top:56px;border-top:1px solid var(--line);padding-top:20px;font-size:11.5px;color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:10px 28px;max-width:760px}
+.foot b{color:var(--teal)}
+
+/* restrained reveal */
+.reveal{opacity:0;transform:translateY(10px);transition:opacity .5s ease,transform .5s ease}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+
+@media (max-width:780px){
+  .grid-4,.grid-3{grid-template-columns:1fr 1fr}
+  .grid-2{grid-template-columns:1fr}
+  .sub{margin-left:0}
+  .foot{grid-template-columns:1fr}
+}
+@media (max-width:460px){.grid-4{grid-template-columns:1fr}}
+
+[data-en],[data-ru]{display:none}
+body.lang-en [data-en]{display:revert}
+body.lang-ru [data-ru]{display:revert}
+body.lang-en span[data-en],body.lang-en tspan[data-en]{display:inline}
+body.lang-ru span[data-ru],body.lang-ru tspan[data-ru]{display:inline}
+</style>
+</head>
+<body class="lang-ru">
+<div class="wrap">
+
+  <div class="langsw">
+    <button id="btn-en" class="" onclick="setLang(&#39;en&#39;)">EN</button>
+    <button id="btn-ru" onclick="setLang(&#39;ru&#39;)" class="on">RU</button>
+  </div>
+
+  <div class="brand">
+    <span class="logo">Triora<span class="dot">.</span></span>
+    <span class="tag">Institutional tri-party lending on onchain rails</span>
+  </div>
+  <div class="eyebrow"><span data-en="">How the protocol works</span><span data-ru="">Как работает протокол</span></div>
+  <p class="intro">
+    <span data-en="">An institution posts BTC or ETH as collateral without selling it, and receives USDC. Funds stay in custody and move between custodians — never touching the smart contract. A crypto version of tri-party repo: P2P builds the technology, AMINA covers the regulatory layer, assets sit under a robust lock.</span>
+    <span data-ru="">Институт закладывает BTC или ETH, не продавая их, и получает USDC. Средства остаются в кастоди и перемещаются между кастоди — не касаясь смарт-контракта. Крипто-версия tri-party repo: P2P строит технологию, AMINA закрывает регуляторику, активы под надёжной блокировкой.</span>
+  </p>
+
+  <!-- 1. ROLES -->
+  <h2><span class="n">01</span><span data-en="">Who does what</span><span data-ru="">Кто что делает</span></h2>
+  <p class="sub">
+    <span data-en="">Four participants, clear separation of duties. P2P makes no financial decisions; AMINA is the licensed broker under whose licence all matching runs; Chainlink issues the token; the custodian holds the assets.</span>
+    <span data-ru="">Четыре участника, чёткое разделение функций. P2P не принимает финансовых решений; AMINA — лицензированный брокер, под чьей лицензией идёт весь матчинг; Chainlink выпускает токен; кастодиан хранит активы.</span>
+  </p>
+  <div class="grid grid-4 reveal in">
+    <div class="cell">
+      <div class="ch"><h3>P2P</h3></div>
+      <div class="role-tag"><span data-en="">Technology layer</span><span data-ru="">Технологический слой</span></div>
+      <ul>
+        <li><span data-en="">Matching engine, UI, smart contracts</span><span data-ru="">Matching engine, UI, смарт-контракты</span></li>
+        <li><span data-en="">Matching runs under AMINA's licence</span><span data-ru="">Матчинг исполняется под лицензией AMINA</span></li>
+        <li><span data-en="">Routes settlement, never touches assets</span><span data-ru="">Маршрутизирует расчёты, не касается активов</span></li>
+        <li><span data-en="">Makes no financial decisions</span><span data-ru="">Не принимает финансовых решений</span></li>
+      </ul>
+    </div>
+    <div class="cell">
+      <div class="ch"><h3>AMINA</h3></div>
+      <div class="role-tag"><span data-en="">Broker · collateral agent</span><span data-ru="">Брокер · collateral agent</span></div>
+      <ul>
+        <li><span data-en="">FINMA-licensed broker</span><span data-ru="">Лицензированный брокер FINMA</span></li>
+        <li><span data-en="">KYB, rates, LTV — financial decisions</span><span data-ru="">KYB, ставки, LTV — финансовые решения</span></li>
+        <li><span data-en="">Collateral agent and mandatory co-signer</span><span data-ru="">Collateral agent и обязательный co-signer</span></li>
+        <li><span data-en="">Liquidator on default</span><span data-ru="">Ликвидатор при дефолте</span></li>
+      </ul>
+    </div>
+    <div class="cell">
+      <div class="ch"><h3>Chainlink CRE</h3></div>
+      <div class="role-tag"><span data-en="">Token issuance · PoR</span><span data-ru="">Выпуск токена · PoR</span></div>
+      <ul>
+        <li><span data-en="">Mints and burns the collateral token</span><span data-ru="">Минтит и жжёт токен залога</span></li>
+        <li><span data-en="">Confirms reserve presence and amount</span><span data-ru="">Подтверждает наличие и объём резерва</span></li>
+        <li><span data-en="">Writes commitment on OTC event</span><span data-ru="">Пишет commitment на OTC-событие</span></li>
+        <li><span data-en="">Removes the minter role from the protocol</span><span data-ru="">Снимает с протокола роль минтера</span></li>
+      </ul>
+    </div>
+    <div class="cell">
+      <div class="ch"><h3><span data-en="">Custodian</span><span data-ru="">Кастодиан</span></h3></div>
+      <div class="role-tag">Anchorage · BitGo</div>
+      <ul>
+        <li><span data-en="">Holds assets in a segregated account</span><span data-ru="">Хранит активы в сегрегированном счёте</span></li>
+        <li><span data-en="">Control agreement and tri-party address</span><span data-ru="">Control agreement и tri-party адрес</span></li>
+        <li><span data-en="">Liquidation and repayment rights</span><span data-ru="">Права на ликвидацию и погашение</span></li>
+        <li><span data-en="">Executes asset redemption</span><span data-ru="">Исполняет редемпшн актива</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 2. LAYERS -->
+  <h2><span class="n">02</span><span data-en="">Ledger layer and custody layer</span><span data-ru="">Учётный слой и слой кастоди</span></h2>
+  <p class="sub">
+    <span data-en="">The protocol operates only in the ledger layer. Real funds stay in custody and move once, bypassing the smart contract.</span>
+    <span data-ru="">Протокол работает только в учётном слое. Реальные средства остаются в кастоди и перемещаются один раз, минуя смарт-контракт.</span>
+  </p>
+  <div class="grid grid-2 reveal in">
+    <div class="cell">
+      <div class="lead-label"><span data-en="">Ledger layer</span><span data-ru="">Учётный слой</span></div>
+      <h4><span data-en="">The protocol operates accounting tokens</span><span data-ru="">Протокол оперирует токенами учёта</span></h4>
+      <p><span data-en="">Collateral, lender liquidity and the loan position are represented by tokens — instruments of accounting for rights and positions, not means of settlement. They pass through matching and service the deal, but carry no value in themselves.</span><span data-ru="">Залог, ликвидность кредитора и позиция займа представлены токенами — это инструменты учёта прав и позиций, а не средства расчёта. Они проходят матчинг и обслуживают сделку, но не несут стоимости сами по себе.</span></p>
+      <p><span data-en="">The smart contract holds no client funds. The protocol is not a custodian in any layer.</span><span data-ru="">Смарт-контракт не удерживает средств клиентов. Протокол не кастодиан ни в каком слое.</span></p>
+    </div>
+    <div class="cell">
+      <div class="lead-label"><span data-en="">Custody layer</span><span data-ru="">Слой кастоди</span></div>
+      <h4><span data-en="">Funds stay with the participants</span><span data-ru="">Средства остаются у участников</span></h4>
+      <p><span data-en="">Real USDC stays in the lender's custody the whole time. It moves <b>once</b> — at loan disbursement — directly between tri-party addresses, under AMINA's mandatory co-signature.</span><span data-ru="">Реальные USDC всё время в кастоди кредитора. Они перемещаются <b>один раз</b> — при выдаче займа — напрямую между tri-party адресами, под обязательной co-подписью AMINA.</span></p>
+      <p><span data-en="">Settlement reliability comes from AMINA as a regulated party, not from trust in contract code.</span><span data-ru="">Надёжность расчёта обеспечивает регулируемое звено AMINA, а не доверие к коду контракта.</span></p>
+    </div>
+  </div>
+
+  <!-- 3. SETTLEMENT -->
+  <h2><span class="n">03</span><span data-en="">How funds move reliably</span><span data-ru="">Как средства перемещаются надёжно</span></h2>
+  <p class="sub">
+    <span data-en="">AMINA does not hold funds; it co-signs the settlement transaction. The lender transfers USDC only to an address over which AMINA is tri-party, and accepts the accounting token only if AMINA's signature is present.</span>
+    <span data-ru="">AMINA не удерживает средства, а co-подписывает расчётную транзакцию. Кредитор переводит USDC только на адрес, над которым AMINA — tri-party, и принимает учётный токен только при наличии подписи AMINA.</span>
+  </p>
+  <div class="diagram reveal in">
+    <svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg" font-family="Archivo, sans-serif">
+      <defs>
+        <marker id="aUsdc" markerWidth="8" markerHeight="8" refX="5.5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#2775ca"></path></marker>
+        <marker id="aGhost" markerWidth="8" markerHeight="8" refX="5.5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#7d949a"></path></marker>
+        <marker id="aSign" markerWidth="8" markerHeight="8" refX="5.5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1f7a5a"></path></marker>
+      </defs>
+
+      <text x="120" y="30" font-size="11" font-weight="700" fill="#9aabae" letter-spacing="1.4" text-anchor="middle">BORROWER · BitGo</text>
+      <text x="500" y="30" font-size="11" font-weight="700" fill="#1f7a5a" letter-spacing="1.4" text-anchor="middle">AMINA · CO-SIGNER</text>
+      <text x="880" y="30" font-size="11" font-weight="700" fill="#9aabae" letter-spacing="1.4" text-anchor="middle">LENDER · Binance</text>
+
+      <rect x="32" y="58" width="176" height="84" rx="10" fill="#fff" stroke="#cdd8da"></rect>
+      <text x="52" y="90" font-size="13" font-weight="700" fill="#003d4c">BitGo</text>
+      <text x="52" y="108" font-size="10.5" fill="#6a7c81"><tspan data-en="">collateral + supply token</tspan><tspan data-ru="">залог + supply-токен</tspan></text>
+      <text x="52" y="126" font-size="10.5" fill="#9aabae"><tspan data-en="">tri-party with AMINA</tspan><tspan data-ru="">tri-party с AMINA</tspan></text>
+
+      <rect x="412" y="58" width="176" height="84" rx="10" fill="#eef4f1" stroke="#1f7a5a" stroke-opacity="0.5"></rect>
+      <text x="432" y="90" font-size="13" font-weight="700" fill="#003d4c">AMINA</text>
+      <text x="432" y="108" font-size="10.5" fill="#1f7a5a"><tspan data-en="">mandatory co-signer</tspan><tspan data-ru="">обязательный co-signer</tspan></text>
+      <text x="432" y="126" font-size="10.5" fill="#3d6b78"><tspan data-en="">holds no funds</tspan><tspan data-ru="">не удерживает средства</tspan></text>
+
+      <rect x="792" y="58" width="176" height="84" rx="10" fill="#fff" stroke="#cdd8da"></rect>
+      <text x="812" y="90" font-size="13" font-weight="700" fill="#003d4c">Binance</text>
+      <text x="812" y="108" font-size="10.5" fill="#6a7c81"><tspan data-en="">real USDC</tspan><tspan data-ru="">реальные USDC</tspan></text>
+      <text x="812" y="126" font-size="10.5" fill="#9aabae"><tspan data-en="">verifies AMINA signature</tspan><tspan data-ru="">проверяет подпись AMINA</tspan></text>
+
+      <!-- ① token: BitGo -> Binance (top orthogonal) -->
+      <polyline points="208,86 300,86 300,186 700,186 700,86 792,86" fill="none" stroke="#7d949a" stroke-width="2" marker-end="url(#aGhost)"></polyline>
+      <rect x="388" y="173" width="224" height="25" rx="6" fill="#fff" stroke="#7d949a"></rect>
+      <text x="500" y="190" font-size="10.5" font-weight="600" fill="#5e7176" text-anchor="middle"><tspan data-en="">①  supply token (accounting)  →</tspan><tspan data-ru="">①  supply-токен (учётный)  →</tspan></text>
+
+      <!-- ② co-sign vertical -->
+      <polyline points="500,142 500,173" fill="none" stroke="#1f7a5a" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#aSign)"></polyline>
+      <text x="510" y="162" font-size="10" font-weight="600" fill="#1f7a5a"><tspan data-en="">② co-signs</tspan><tspan data-ru="">② co-подпись</tspan></text>
+
+      <!-- ③ real USDC: Binance -> BitGo (bottom orthogonal) -->
+      <polyline points="792,118 700,118 700,278 300,278 300,118 208,118" fill="none" stroke="#2775ca" stroke-width="2.5" marker-end="url(#aUsdc)"></polyline>
+      <rect x="386" y="265" width="228" height="25" rx="6" fill="#fff" stroke="#2775ca"></rect>
+      <text x="500" y="282" font-size="10.5" font-weight="600" fill="#2775ca" text-anchor="middle"><tspan data-en="">③  ←  real USDC  (once)</tspan><tspan data-ru="">③  ←  реальные USDC  (один раз)</tspan></text>
+
+      <!-- CRE band -->
+      <rect x="32" y="330" width="936" height="74" rx="10" fill="#f7f9fc" stroke="#375bd2" stroke-opacity="0.3"></rect>
+      <text x="52" y="358" font-size="12" font-weight="700" fill="#003d4c"><tspan data-en="">Chainlink CRE — token issuance and Proof of Reserves</tspan><tspan data-ru="">Chainlink CRE — выпуск токена и Proof of Reserves</tspan></text>
+      <text x="52" y="376" font-size="10.5" fill="#6a7c81"><tspan data-en="">CRE confirms collateral on the address, mints the token 1:1 and deposits it into the protocol for the borrower.</tspan><tspan data-ru="">CRE подтверждает залог на адресе, минтит токен 1:1 и заводит его в протокол за заёмщика.</tspan></text>
+      <text x="52" y="392" font-size="10.5" fill="#6a7c81"><tspan data-en="">Chainlink issues the token, not the protocol — P2P is not a minter.</tspan><tspan data-ru="">Токен выпускает Chainlink, а не протокол — P2P не минтер.</tspan></text>
+
+      <text x="500" y="436" font-size="10.5" fill="#6a7c81" text-anchor="middle"><tspan data-en="">One allowed route only: transfer to the tri-party address, and only with AMINA's co-signature.</tspan><tspan data-ru="">Единственный разрешённый маршрут: перевод только на tri-party адрес и только при наличии co-подписи AMINA.</tspan></text>
+      <text x="500" y="454" font-size="10.5" fill="#6a7c81" text-anchor="middle"><tspan data-en="">AMINA never holds funds — just a mandatory signing link. No intermediary that could lose the assets.</tspan><tspan data-ru="">AMINA нигде не удерживает средства — лишь обязательное звено подписи. Нет посредника, способного утратить активы.</tspan></text>
+      <text x="500" y="482" font-size="11" font-weight="700" fill="#003d4c" text-anchor="middle"><tspan data-en="">Trace: borrower gets supply token → sends it to lender (AMINA co-signs) → lender transfers real USDC.</tspan><tspan data-ru="">Трейс: заёмщик получает supply-токен → переводит кредитору (AMINA co-подписывает) → кредитор переводит реальные USDC.</tspan></text>
+    </svg>
+  </div>
+  <div class="legend reveal in">
+    <span class="it"><span class="swatch" style="border-top-color:#7d949a"></span><span data-en="">Supply token</span><span data-ru="">Supply-токен</span></span>
+    <span class="it"><span class="swatch" style="border-top-color:#2775ca"></span><span data-en="">Real USDC</span><span data-ru="">Реальные USDC</span></span>
+    <span class="it"><span class="swatch" style="border-top-color:#1f7a5a;border-top-style:dashed"></span><span data-en="">AMINA co-signature</span><span data-ru="">Co-подпись AMINA</span></span>
+  </div>
+
+  <!-- 4. STEPS -->
+  <h2><span class="n">04</span><span data-en="">Step by step</span><span data-ru="">Пошагово</span></h2>
+  <p class="sub"><span data-en="">One deal cycle.</span><span data-ru="">Один цикл сделки.</span></p>
+  <div class="steps reveal in">
+    <div class="step"><span class="sn">1</span><h4><span data-en="">Lender places an order</span><span data-ru="">Кредитор размещает заявку</span><span class="who">AMINA</span></h4><p><span data-en="">Binance holds USDC in its own custody. A position is created in the protocol — funds do not leave custody. Matching runs under AMINA's licence.</span><span data-ru="">Binance держит USDC в собственной кастоди. В протоколе создаётся позиция — средства кастоди не покидают. Матчинг исполняется под лицензией AMINA.</span></p></div>
+    <div class="step"><span class="sn">2</span><h4><span data-en="">Borrower completes KYB and connects custody</span><span data-ru="">Заёмщик проходит KYB и подключает кастоди</span><span class="who">AMINA</span></h4><p><span data-en="">P2P collects data via the UI; AMINA screens and approves under its FINMA licence, signs the collateral control agreement and connects as tri-party to the BitGo address.</span><span data-ru="">P2P собирает данные через UI; AMINA проводит скрининг и одобрение под лицензией FINMA, заключает collateral control agreement и подключается в tri-party к адресу BitGo.</span></p></div>
+    <div class="step"><span class="sn">3</span><h4><span data-en="">Chainlink issues the collateral token</span><span data-ru="">Chainlink выпускает токен залога</span><span class="who">Chainlink</span></h4><p><span data-en="">CRE confirms collateral on the address, correct amount, AMINA in tri-party. On this basis Chainlink CRE mints the collateral token 1:1 and deposits it into the protocol — with no P2P as minter.</span><span data-ru="">CRE подтверждает: залог на адресе, объём корректен, AMINA в tri-party. На этом основании Chainlink CRE минтит токен залога 1:1 и заводит его в протокол — без участия P2P как минтера.</span></p></div>
+    <div class="step key"><span class="sn">4</span><h4><span data-en="">Settlement — receiving funds</span><span data-ru="">Расчёт — получение средств</span><span class="who">AMINA</span></h4><p><span data-en="">The borrower transfers the supply token to the lender's address. AMINA's mandatory co-signature confirms the route is legitimate. The lender, having verified the signature, transfers real USDC to the borrower's tri-party address. Interest accrual starts here.</span><span data-ru="">Заёмщик переводит supply-токен на адрес кредитора. AMINA обязательной co-подписью подтверждает легитимность маршрута. Кредитор, проверив подпись, переводит реальные USDC на tri-party адрес заёмщика. Начисление процентов начинается здесь.</span></p></div>
+    <div class="step"><span class="sn">5</span><h4><span data-en="">Loan term</span><span data-ru="">Срок займа</span><span class="who">P2P</span></h4><p><span data-en="">Funds with the borrower, collateral locked. The protocol monitors the health factor; on risk, AMINA notifies 48 hours ahead.</span><span data-ru="">Средства у заёмщика, залог заблокирован. Протокол отслеживает health factor; при риске AMINA уведомляет за 48 часов.</span></p></div>
+    <div class="step"><span class="sn">6</span><h4><span data-en="">Repayment — collateral release</span><span data-ru="">Погашение — разблокировка залога</span><span class="who">BitGo</span></h4><p><span data-en="">The borrower returns principal and interest via the same route under AMINA's co-signature. The collateral token is burned, BitGo releases the asset.</span><span data-ru="">Заёмщик возвращает основную сумму и проценты тем же маршрутом под co-подписью AMINA. Токен залога гасится, BitGo разблокирует актив.</span></p></div>
+  </div>
+
+  <!-- 5. TOKENIZATION -->
+  <h2><span class="n">05</span><span data-en="">What is tokenized and why</span><span data-ru="">Что и зачем токенизируется</span></h2>
+  <p class="sub">
+    <span data-en="">Three different things are tokenized, each with its own purpose. The protocol itself issues nothing: tokens are minted and burned by Chainlink CRE, with mint and withdraw rights written into the contract.</span>
+    <span data-ru="">В системе токенизируются три разные вещи, у каждой своё назначение. Протокол при этом сам ничего не выпускает: токены минтит и жжёт Chainlink CRE, с правами mint и withdraw, прописанными в контракте.</span>
+  </p>
+  <div class="grid grid-3 reveal in">
+    <div class="cell">
+      <span class="tk">cBTC</span>
+      <h4><span data-en="">Collateral</span><span data-ru="">Залог</span></h4>
+      <p><span data-en="">The borrower's BTC or ETH, locked in custody and represented by a token 1:1.</span><span data-ru="">BTC или ETH заёмщика, заблокированные в кастоди и представленные токеном 1:1.</span></p>
+      <p class="why"><b><span data-en="">Why.</span><span data-ru="">Зачем.</span></b> <span data-en="">Tokenize once, borrow many times. The heavy custody operation — lock plus control agreement — is done once, after which the collateral becomes reusable inventory: the borrower takes many loans instantly, with no need to re-engage the custodian. Also: redemption right enables fast liquidation, and positions stay isolated.</span><span data-ru="">Токенизация один раз — займы много раз. Тяжёлая custody-операция — lock плюс control agreement — проходится единожды, после чего залог становится переиспользуемым inventory: заёмщик берёт множество займов мгновенно, без повторного подключения кастодиана. Плюс: redemption right даёт быструю ликвидацию, позиции остаются изолированными.</span></p>
+    </div>
+    <div class="cell">
+      <span class="tk">cUSDC</span>
+      <h4><span data-en="">Lender liquidity</span><span data-ru="">Ликвидность кредитора</span></h4>
+      <p><span data-en="">A representation of the lender's reserved USDC. The real money stays in their custody.</span><span data-ru="">Представление зарезервированных USDC кредитора. Реальные деньги остаются в его кастоди.</span></p>
+      <p class="why"><b><span data-en="">Why.</span><span data-ru="">Зачем.</span></b> <span data-en="">To separate the ledger layer from the settlement layer. The token is a reservation of liquidity the protocol operates without touching real funds. Without it the contract would either hold real USDC — a honeypot and custodian status — or could not reserve liquidity before matching. Money moves once, at settlement.</span><span data-ru="">Отделить учётный слой от расчётного. Токен — это «бронь» ликвидности, которой оперирует протокол, не трогая настоящие средства. Без него контракт либо держал бы реальные USDC — honeypot и статус кастодиана — либо не мог бы зарезервировать ликвидность до матча. Деньги двигаются один раз, при расчёте.</span></p>
+    </div>
+    <div class="cell">
+      <span class="tk">loan</span>
+      <h4><span data-en="">Loan position</span><span data-ru="">Позиция займа</span></h4>
+      <p><span data-en="">The lender's right to principal and interest, formalized as a token.</span><span data-ru="">Право кредитора на возврат основной суммы и процентов, оформленное токеном.</span></p>
+      <p class="why"><b><span data-en="">Why.</span><span data-ru="">Зачем.</span></b> <span data-en="">Position mobility. The lender can sell the loan on a secondary market before maturity, or re-pledge it to borrow against it — composability, looping. It carries elevated cascading risk, so re-pledging needs its own risk model and haircut.</span><span data-ru="">Мобильность позиции. Кредитор может продать заём на вторичном рынке, не дожидаясь погашения, или перезаложить его и получить под него ликвидность — composability, looping. Несёт повышенный каскадный риск, поэтому под перезалог — отдельная risk-модель и haircut.</span></p>
+    </div>
+  </div>
+  <div class="note accent reveal in">
+    <b><span data-en="">The first two tokenizations reduce risk; the third increases it for yield.</span><span data-ru="">Первые две токенизации снижают риск; третья повышает его ради доходности.</span></b>
+    <span data-en=""> cBTC and cUSDC exist so the deal can happen safely — the rails. Loan tokenization exists so the position can be used further — leverage and liquidity. Different tasks, different risk profiles; it matters not to mix them.</span>
+    <span data-ru=""> cBTC и cUSDC нужны, чтобы сделка вообще произошла безопасно — это рельсы. Токенизация займа — чтобы позицию можно было дальше использовать — leverage и ликвидность. Разные задачи, разный риск-профиль; их важно не смешивать.</span>
+  </div>
+
+  <!-- 6. CONNECTOR -->
+  <h2><span class="n">06</span><span data-en="">Native connector into on-chain liquidity</span><span data-ru="">Нативный коннектор в on-chain ликвидность</span></h2>
+  <p class="sub">
+    <span data-en="">Because the protocol is built on smart contracts, tokenized collateral is a standard on-chain asset — so it can be borrowed against directly in a DeFi protocol, without leaving the system.</span>
+    <span data-ru="">Поскольку протокол построен на смарт-контрактах, токенизированный залог — это стандартный on-chain актив, а значит, под него можно занять напрямую в DeFi-протоколе, не выходя из системы.</span>
+  </p>
+  <div class="grid grid-2 reveal in">
+    <div class="cell">
+      <div class="lead-label"><span data-en="">Capability</span><span data-ru="">Возможность</span></div>
+      <h4><span data-en="">Collateral → borrow in Aave or Morpho</span><span data-ru="">Залог → заём в Aave или Morpho</span></h4>
+      <p><span data-en="">The collateral token is an ERC-20 that existing protocols understand. The bridge can call borrow on Morpho or Aave, owning the position, and route the received USDC to the borrower. Liquidity comes from an on-chain pool, not only an institutional lender.</span><span data-ru="">Токен залога — это ERC-20, который понимают существующие протоколы. Мост может вызвать borrow в Morpho или Aave, владея позицией, и направить полученный USDC заёмщику. Ликвидность приходит из on-chain пула, а не только от институционального кредитора.</span></p>
+      <p><span data-en="">This turns Triora from a closed tri-party venue into a gateway between institutional collateral and public DeFi liquidity.</span><span data-ru="">Это превращает Triora из закрытой tri-party площадки в шлюз между институциональным залогом и публичной DeFi-ликвидностью.</span></p>
+    </div>
+    <div class="cell">
+      <div class="lead-label"><span data-en="">What it gives</span><span data-ru="">Что это даёт</span></div>
+      <h4><span data-en="">Two liquidity sources in one system</span><span data-ru="">Два источника ликвидности в одной системе</span></h4>
+      <p><span data-en="">The same tokenized collateral serves either an institutional deal or an on-chain loan — the borrower picks where the rate is better. The custody lock and tri-party control are preserved in both cases.</span><span data-ru="">Один и тот же токенизированный залог обслуживает либо институциональную сделку, либо on-chain заём — заёмщик выбирает, где ставка лучше. Custody-блокировка и tri-party контроль сохраняются в обоих случаях.</span></p>
+      <p><span data-en="">The contract-based architecture makes this a natural extension, not a separate integration: the rails are already on-chain.</span><span data-ru="">Архитектура на контрактах делает это естественным расширением, а не отдельной интеграцией: рельсы уже on-chain.</span></p>
+    </div>
+  </div>
+
+  <!-- 7. RISK -->
+  <h2><span class="n">07</span><span data-en="">Risk allocation</span><span data-ru="">Разделение рисков</span></h2>
+  <p class="sub">
+    <span data-en="">The model mirrors BNY Mellon in tri-party repo: infrastructure without credit risk. Each row answers whether P2P takes on something that should sit with AMINA.</span>
+    <span data-ru="">Модель зеркалит BNY Mellon в tri-party repo: инфраструктура без кредитного риска. Каждая строка отвечает, не берёт ли P2P на себя то, что должно быть на AMINA.</span>
+  </p>
+  <table class="ltable reveal in">
+    <thead><tr>
+      <th><span data-en="">Risk</span><span data-ru="">Риск</span></th>
+      <th><span data-en="">Who bears it</span><span data-ru="">Кто несёт</span></th>
+      <th><span data-en="">Why not P2P</span><span data-ru="">Почему не P2P</span></th>
+    </tr></thead>
+    <tbody>
+      <tr><td><span data-en="">Borrower default</span><span data-ru="">Дефолт заёмщика</span></td><td><span class="bears">AMINA</span></td><td><span data-en="">AMINA liquidates and redeems collateral in custody. P2P issues no loans and holds no balance.</span><span data-ru="">AMINA ликвидирует и редимит залог в кастоди. P2P не выдаёт займы и не держит баланс.</span></td></tr>
+      <tr><td><span data-en="">Matching as brokerage</span><span data-ru="">Матчинг как брокераж</span></td><td><span class="bears">AMINA</span></td><td><span data-en="">P2P builds the engine, but matching legally runs under AMINA's Securities Dealer licence. Clients are AMINA's clients.</span><span data-ru="">Движок строит P2P, но матчинг юридически исполняется под Securities Dealer лицензией AMINA. Клиенты — клиенты AMINA.</span></td></tr>
+      <tr><td><span data-en="">Rates and LTV</span><span data-ru="">Ставки и LTV</span></td><td><span class="bears">AMINA</span></td><td><span data-en="">All financial parameters are set by AMINA. P2P displays and applies them — makes no decisions.</span><span data-ru="">Все финансовые параметры устанавливает AMINA. P2P отображает и применяет их — не принимает решений.</span></td></tr>
+      <tr><td><span data-en="">Identity / KYB</span><span data-ru="">Идентификация / KYB</span></td><td><span class="bears">AMINA</span></td><td><span data-en="">P2P collects data via the UI; screening and approval are done by AMINA under its FINMA licence.</span><span data-ru="">P2P собирает данные через UI; скрининг и одобрение делает AMINA под лицензией FINMA.</span></td></tr>
+      <tr><td><span data-en="">Holding of funds</span><span data-ru="">Удержание средств</span></td><td><span class="bears none"><span data-en="">none</span><span data-ru="">никто</span></span></td><td><span data-en="">Real funds are always in participants' custody. The contract operates only accounting tokens — no money-transmission risk.</span><span data-ru="">Реальные средства всегда в кастоди участников. Контракт оперирует только учётными токенами — нет money-transmission риска.</span></td></tr>
+      <tr><td><span data-en="">Token issuance</span><span data-ru="">Выпуск токенов</span></td><td><span class="bears none">Chainlink</span></td><td><span data-en="">The token is minted and burned by Chainlink CRE. P2P does not mint or attest reserves — not an issuer.</span><span data-ru="">Токен минтит и жжёт Chainlink CRE. P2P не минтит и не подтверждает резервы — не эмитент.</span></td></tr>
+      <tr><td><span data-en="">Security interest</span><span data-ru="">Обеспечительное право</span></td><td><span class="bears">AMINA</span></td><td><span data-en="">Established by the collateral control agreement, where AMINA is collateral agent — a formalized right that survives bankruptcy, not just a multisig signature.</span><span data-ru="">Закрепляется collateral control agreement, где AMINA — collateral agent: оформленное право, переживающее банкротство, а не просто подпись в мультисиге.</span></td></tr>
+      <tr><td><span data-en="">Collateral redemption</span><span data-ru="">Редемпшн залога</span></td><td><span class="bears">AMINA</span></td><td><span data-en="">Uses the custodian's native engine plus tri-party. Redemption is contractually fixed, not dependent on goodwill.</span><span data-ru="">Используется нативный движок кастодиана плюс tri-party. Редемпшн закреплён договорно, а не зависит от доброй воли.</span></td></tr>
+      <tr><td><span data-en="">Smart contract bug</span><span data-ru="">Ошибка в контракте</span></td><td><span class="bears rep"><span data-en="">reputational</span><span data-ru="">репутационный</span></span></td><td><span data-en="">The only risk relevant to P2P. Mitigated by audit and bug bounty. Not financial or regulatory.</span><span data-ru="">Единственный риск, релевантный P2P. Митигируется аудитом и bug bounty. Не финансовый и не регуляторный.</span></td></tr>
+      <tr><td><span data-en="">Reclassification</span><span data-ru="">Переквалификация</span></td><td><span class="bears none"><span data-en="">low</span><span data-ru="">низкий</span></span></td><td><span data-en="">P2P is a technology provider: no financial decisions, no custody, no matching outside AMINA's licence.</span><span data-ru="">P2P — технологический провайдер: нет финансовых решений, кастоди и матчинга вне лицензии AMINA.</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note warn reveal in">
+    <b><span data-en="">To challenge with lawyers.</span><span data-ru="">Почелленджить с юристами.</span></b>
+    <span data-en=""> Three points where P2P could quietly pull liability onto itself: the SettlementRouter must only emit events, not initiate fund transfers; the click-through wording on KYB must explicitly place the decision with AMINA, with P2P merely passing data; the UI must present the rate as AMINA's parameter, not a platform offer. Separately, "instant liquidation without court" must not read as a guarantee — sanctions freeze, custody outage and insolvency stay are possible. Phrase it as deterministic by the rules, absent force majeure.</span>
+    <span data-ru=""> Три точки, где P2P может незаметно подтянуть ответственность: SettlementRouter должен только эмитить события, не инициировать перевод средств; формулировки click-through по KYB должны явно класть решение на AMINA, P2P лишь передаёт данные; UI должен подавать ставку как параметр AMINA, а не предложение платформы. Отдельно: «мгновенная ликвидация без суда» не должна звучать как гарантия — возможны sanctions freeze, custody outage, insolvency stay. Формулировать как детерминированную по правилам, при отсутствии форс-мажора.</span>
+  </div>
+
+  <div class="foot">
+    <span><b>P2P</b> — <span data-en="">technology layer; no financial decisions or custody.</span><span data-ru="">технологический слой; без финансовых решений и кастоди.</span></span>
+    <span><b>AMINA</b> — <span data-en="">FINMA broker, collateral agent, co-signer, liquidator.</span><span data-ru="">брокер FINMA, collateral agent, co-подпись, ликвидатор.</span></span>
+    <span><b>Chainlink CRE</b> — <span data-en="">token issuance and Proof of Reserves.</span><span data-ru="">выпуск токена и Proof of Reserves.</span></span>
+    <span><b><span data-en="">Custodian</span><span data-ru="">Кастодиан</span></b> — <span data-en="">holding, control agreement, liquidation and repayment.</span><span data-ru="">хранение, control agreement, ликвидация и погашение.</span></span>
+  </div>
+
+</div>
+<script>
+function setLang(l){
+  document.body.classList.remove('lang-en','lang-ru');
+  document.body.classList.add('lang-'+l);
+  document.documentElement.lang=l;
+  document.getElementById('btn-en').classList.toggle('on', l==='en');
+  document.getElementById('btn-ru').classList.toggle('on', l==='ru');
+  document.title = l==='en' ? 'Triora — How the protocol works' : 'Triora — Как работает протокол';
+}
+const els=document.querySelectorAll('.reveal');
+if('IntersectionObserver'in window){
+  const io=new IntersectionObserver((e)=>{e.forEach(x=>{if(x.isIntersecting){x.target.classList.add('in');io.unobserve(x.target);}})},{threshold:.1});
+  els.forEach(el=>io.observe(el));
+}else{els.forEach(el=>el.classList.add('in'));}
+</script>
+
+
+<div id="tenderly-toolbar-content-view-root"><template shadowrootmode="open"><div id="shadow-root"><div class="TenderlyToolbarContent false"></div></div></template></div></body></html>

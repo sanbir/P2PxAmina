@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<!-- saved from url=(0033)https://triora.up.railway.app/app -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Triora — Lend &amp; Borrow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com/">
+<link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="">
+<link href="./Triora — Lend &amp; Borrow_files/css2" rel="stylesheet">
+<style>
+:root{
+  --petrol:#003d4c; --petrol-700:#0a4d5e; --petrol-300:#5b8b97;
+  --ink:#0f2229; --muted:#5f7178; --faint:#8a999e;
+  --line:#e6e9ea; --line-2:#eef1f1; --bg:#f4f6f6; --card:#fff;
+  --green:#157f53; --green-bg:#e6f4ec; --amber:#9a6b06; --amber-bg:#fbf0db;
+  --red:#b23b3b; --red-bg:#f8e7e7; --usdc:#2775ca;
+  --radius:14px; --radius-sm:10px;
+  --shadow:0 1px 2px rgba(15,34,41,.05),0 8px 24px -16px rgba(15,34,41,.18);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:"IBM Plex Sans",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+button{font-family:inherit;cursor:pointer;border:none;background:none}
+:focus-visible{outline:2px solid var(--petrol);outline-offset:2px;border-radius:6px}
+
+.app{display:grid;grid-template-columns:228px 1fr;min-height:100vh}
+.sidebar{background:var(--petrol);color:#dfeaed;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;padding:22px 14px}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 24px}
+.brand-mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#3fbf9a,#0a8f8f);position:relative;flex:none}
+.brand-mark::after{content:"";position:absolute;inset:7px;border:2px solid var(--petrol);border-radius:3px}
+.brand-name{font-weight:700;font-size:16px;color:#fff}
+.brand-sub{font-size:10px;color:var(--petrol-300);letter-spacing:1.5px;text-transform:uppercase;margin-top:-2px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav-item{display:flex;align-items:center;gap:11px;padding:10px;border-radius:9px;color:#bcd2d8;font-size:13.5px;font-weight:500;width:100%;text-align:left;transition:.12s}
+.nav-item:hover{background:rgba(255,255,255,.06);color:#fff}
+.nav-item.active{background:rgba(255,255,255,.12);color:#fff}
+.nav-item svg{width:17px;height:17px;flex:none;opacity:.9}
+.setup-card{margin-top:auto;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:14px}
+.setup-card h4{margin:0 0 10px;font-size:12px;color:#fff;font-weight:600;letter-spacing:.3px}
+.setup-step{display:flex;align-items:center;gap:9px;font-size:12px;color:#9fb6bc;padding:3px 0}
+.setup-step .tick{width:16px;height:16px;border-radius:50%;border:1.5px solid #4d7782;display:grid;place-items:center;flex:none;font-size:9px}
+.setup-step.done{color:#bdeede}.setup-step.done .tick{background:#3fbf9a;border-color:#3fbf9a;color:var(--petrol)}
+
+.main{display:flex;flex-direction:column;min-width:0}
+.topbar{display:flex;align-items:center;gap:16px;padding:18px 32px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.7);backdrop-filter:blur(6px);position:sticky;top:0;z-index:20}
+.topbar h1{font-size:19px;margin:0;font-weight:700}
+.topbar .sub{color:var(--muted);font-size:12.5px;margin-top:1px}
+.spacer{flex:1}
+.acct{display:flex;align-items:center;gap:9px;padding:6px 6px 6px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.acct .nm{font-size:12.5px;font-weight:600;line-height:1.1}
+.acct .ent{font-size:10.5px;color:var(--faint)}
+.avatar{width:30px;height:30px;border-radius:8px;background:var(--petrol);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700}
+.content{padding:26px 32px 60px;max-width:1080px;width:100%}
+
+/* balance strip */
+.bal{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:24px}
+.bal .chip{display:flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+.bal .chip .ic{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:700;font-family:"IBM Plex Mono";flex:none}
+.bal .chip .k{font-size:10.5px;color:var(--faint);letter-spacing:.3px;text-transform:uppercase}
+.bal .chip .v{font-size:15px;font-weight:600}
+.bal .chip .v .s{font-size:11px;color:var(--muted);font-weight:400}
+.ic-btc{background:#f7931a}.ic-eth{background:#4a6cf7}.ic-sol{background:linear-gradient(135deg,#9945ff,#14f195)}.ic-usdc{background:var(--usdc)}
+.bal .tok-btn{margin-left:auto}
+
+/* setup banner */
+.banner{display:flex;align-items:center;gap:14px;background:linear-gradient(100deg,#063744,#0a5263);color:#eaf5f6;border-radius:var(--radius);padding:18px 22px;margin-bottom:24px}
+.banner .bi{width:38px;height:38px;border-radius:10px;background:rgba(255,255,255,.12);display:grid;place-items:center;flex:none}
+.banner .bi svg{width:20px;height:20px;color:#9be7cf}
+.banner h3{margin:0;font-size:15px;color:#fff}
+.banner p{margin:2px 0 0;font-size:12.5px;color:#a9cdd3}
+
+/* markets table */
+.section-title{font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.3px;margin:0 0 12px;text-transform:uppercase}
+.mkt{background:#fff;border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.mkt-head,.mkt-row{display:grid;grid-template-columns:1.7fr 1fr auto;gap:14px;align-items:center;padding:14px 22px}
+.mkt-head{border-bottom:1px solid var(--line-2);font-size:11px;color:var(--faint);letter-spacing:.4px;text-transform:uppercase;font-weight:600}
+.mkt-row{border-bottom:1px solid var(--line-2);transition:.1s}
+.mkt-row:last-child{border-bottom:none}
+.mkt-row:hover{background:#fafcfc}
+.mkt-asset{display:flex;align-items:center;gap:12px}
+.mkt-asset .ic{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700;font-family:"IBM Plex Mono";flex:none}
+.mkt-asset .nm{font-weight:600;font-size:14px}
+.mkt-asset .sub{font-size:11.5px;color:var(--faint)}
+.mkt-col .v{font-weight:600;font-size:14px}
+.mkt-col .vg{color:var(--green)}
+.mkt-col .l{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.3px;margin-top:1px}
+.mkt-actions{display:flex;gap:8px}
+.mkt-actions .btn{min-width:128px}
+.tok-step{display:flex;gap:13px;padding:9px 0}
+.tok-step .n{width:26px;height:26px;border-radius:50%;background:#eef1f1;color:var(--petrol);font-weight:700;font-size:12px;display:grid;place-items:center;flex:none}
+.tok-step .st{font-weight:600;font-size:13.5px}
+.tok-step .sd{font-size:12.5px;color:var(--muted)}
+.tok-bal{font-size:12.5px;color:var(--muted)}.tok-bal b{display:block;font-family:"IBM Plex Mono";font-size:17px;color:var(--ink);margin-top:2px}
+
+.btn{padding:9px 16px;border-radius:9px;font-size:13px;font-weight:600;transition:.12s;white-space:nowrap;display:inline-flex;align-items:center;gap:7px;justify-content:center}
+.btn-primary{background:var(--petrol);color:#fff}.btn-primary:hover{background:var(--petrol-700)}
+.btn-ghost{background:#eef1f1;color:var(--petrol)}.btn-ghost:hover{background:#e2e8e8}
+.btn-out{border:1px solid var(--line);color:var(--ink);background:#fff}.btn-out:hover{border-color:#c5cfd1}
+.btn-sm{padding:7px 13px;font-size:12.5px}
+.btn-block{width:100%;padding:13px;font-size:14px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+
+/* portfolio */
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.panel{background:#fff;border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.panel.full{grid-column:1/-1}
+.panel-head{padding:15px 20px;border-bottom:1px solid var(--line-2);display:flex;align-items:center;justify-content:space-between}
+.panel-head h2{margin:0;font-size:14.5px;font-weight:700}
+.panel-head .net{font-size:12px;color:var(--muted)}.panel-head .net b{font-family:"IBM Plex Mono";color:var(--ink)}
+.prow{display:grid;grid-template-columns:auto 1fr auto auto;gap:14px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--line-2);cursor:pointer;transition:.1s}
+.prow:last-child{border-bottom:none}.prow:hover{background:#fafcfc}
+.prow .ic{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:700;font-family:"IBM Plex Mono"}
+.prow .nm{font-weight:600;font-size:13.5px}
+.prow .sub{font-size:11.5px;color:var(--faint);display:flex;align-items:center;gap:7px;margin-top:2px}
+.prow .num{text-align:right}.prow .num .big{font-weight:600;font-size:13.5px}.prow .num .sml{font-size:11px;color:var(--muted)}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:20px}
+.t-lend{background:#e7eefb;color:#2456b8}.t-borrow{background:#fdeede;color:#9a5b06}
+.t-green{background:var(--green-bg);color:var(--green)}.t-amber{background:var(--amber-bg);color:var(--amber)}.t-red{background:var(--red-bg);color:var(--red)}
+.spin{width:13px;height:13px;border:2px solid #cdd6d8;border-top-color:var(--petrol);border-radius:50%;display:inline-block;animation:sp .7s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.empty{padding:32px 20px;text-align:center;color:var(--muted)}
+.empty h4{margin:0 0 4px;color:var(--ink);font-size:14px}.empty p{margin:0 0 16px;font-size:12.5px}
+.stat-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+.stat{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+.stat .k{font-size:11px;color:var(--faint);letter-spacing:.3px;text-transform:uppercase}
+.stat .v{font-size:23px;font-weight:600;margin-top:6px}.stat .d{font-size:11.5px;color:var(--muted);margin-top:3px}
+
+/* modal */
+.overlay{position:fixed;inset:0;background:rgba(15,34,41,.42);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:100;padding:24px}
+.overlay.show{display:flex}
+.modal{background:#fff;border-radius:18px;width:100%;max-width:480px;box-shadow:0 30px 70px -20px rgba(15,34,41,.5);overflow:hidden;animation:pop .18s ease;max-height:92vh;overflow-y:auto}
+.modal.wide{max-width:540px}
+@keyframes pop{from{transform:translateY(10px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+.modal-head{padding:20px 24px 0;display:flex;justify-content:space-between;align-items:flex-start}
+.modal-head h2{margin:0;font-size:18px;font-weight:700}
+.modal-head p{margin:4px 0 0;font-size:13px;color:var(--muted)}
+.x{font-size:22px;color:var(--faint);line-height:1;padding:2px 6px;border-radius:6px}.x:hover{background:#f0f3f3;color:var(--ink)}
+.modal-body{padding:20px 24px 24px}
+.actor-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.4px;padding:2px 7px;border-radius:5px;background:#0a4d5e;color:#bdeede;margin-left:6px;vertical-align:middle}
+.actor-tag.cl{background:#1a2b6b;color:#bcd0ff}.actor-tag.cu{background:#5a3a13;color:#f3d9b0}
+
+/* stepper */
+.steps{display:flex;margin:18px 24px 0;border-bottom:1px solid var(--line)}
+.step{flex:1;text-align:center;padding-bottom:12px;font-size:11.5px;color:var(--faint);position:relative;font-weight:600}
+.step .n{width:24px;height:24px;border-radius:50%;border:1.6px solid var(--line);display:grid;place-items:center;margin:0 auto 6px;font-size:11px;background:#fff}
+.step.active{color:var(--petrol)}.step.active .n{border-color:var(--petrol);color:var(--petrol)}
+.step.done{color:var(--green)}.step.done .n{border-color:var(--green);background:var(--green);color:#fff}
+.step.active::after,.step.done::after{content:"";position:absolute;bottom:-1px;left:0;right:0;height:2px;background:currentColor}
+.step-pane{padding:22px 24px 8px;animation:fade .2s}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+.step-pane h3{margin:0 0 6px;font-size:16px}
+.step-pane .lead{color:var(--muted);font-size:13px;margin:0 0 18px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:600;margin-bottom:6px}
+.field input,.field select{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font-family:inherit;font-size:13.5px;background:#fbfcfc}
+.field input:focus,.field select:focus{border-color:var(--petrol);outline:none;background:#fff}
+.choice{display:flex;gap:10px}
+.choice .opt{flex:1;border:1.4px solid var(--line);border-radius:11px;padding:13px;cursor:pointer;text-align:center;transition:.12s}
+.choice .opt:hover{border-color:#c5cfd1}.choice .opt.sel{border-color:var(--petrol);background:#f1f7f8}
+.choice .opt .ico{width:30px;height:30px;border-radius:8px;margin:0 auto 7px;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700;font-family:"IBM Plex Mono"}
+.choice .opt .lab{font-size:12.5px;font-weight:600}.choice .opt .sm{font-size:10.5px;color:var(--faint);margin-top:1px}
+.info-card{background:#f5f8f8;border:1px solid var(--line-2);border-radius:12px;padding:13px 15px;font-size:12.5px;color:var(--muted);display:flex;gap:10px;margin-bottom:16px}
+.info-card svg{width:17px;height:17px;flex:none;color:var(--petrol);margin-top:1px}.info-card b{color:var(--ink)}
+.modal-foot{padding:14px 24px 22px;display:flex;gap:10px;align-items:center;border-top:1px solid var(--line-2)}
+.modal-foot .left{font-size:12px;color:var(--faint)}
+.foot-btns{display:flex;gap:10px;margin-left:auto}
+
+/* order flow */
+.amount-box{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:18px}
+.amount-box .top{display:flex;justify-content:space-between;font-size:11.5px;color:var(--faint)}
+.amount-box .inp{display:flex;align-items:center}
+.amount-box input{border:none;background:none;font-size:28px;font-weight:600;font-family:"IBM Plex Mono";width:72%;padding:4px 0;color:var(--ink)}
+.amount-box input:focus{outline:none}
+.amount-box .cur{font-size:13px;color:var(--muted);font-weight:600;margin-left:auto}
+.quick{display:flex;gap:7px;margin-top:8px}
+.quick button{font-size:11px;padding:4px 10px;border-radius:7px;background:#eef1f1;color:var(--muted);font-weight:600}
+.quick button:hover{background:var(--petrol);color:#fff}
+.olabel{font-size:12px;font-weight:700;margin:0 0 8px;display:flex;justify-content:space-between;align-items:center}
+.olabel .hint{font-weight:400;color:var(--faint);font-size:11.5px}
+.seg{display:flex;background:#eef1f1;border-radius:11px;padding:3px;gap:3px;margin-bottom:8px}
+.seg button{flex:1;padding:10px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--muted);line-height:1.2}
+.seg button .s{display:block;font-size:10.5px;font-weight:400;color:var(--faint);margin-top:2px}
+.seg button.on{background:#fff;color:var(--petrol);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg button.on .s{color:var(--muted)}
+.rate-input{display:flex;align-items:center;border:1px solid var(--line);border-radius:11px;overflow:hidden;margin-bottom:8px}
+.rate-input input{flex:1;border:none;padding:12px 14px;font-size:18px;font-weight:600;font-family:"IBM Plex Mono";color:var(--ink)}
+.rate-input input:focus{outline:none}
+.rate-input .pct{padding:0 14px;color:var(--muted);font-weight:600}
+.rate-input .step-btn{width:42px;align-self:stretch;background:#f3f6f6;color:var(--petrol);font-size:18px;font-weight:600}
+.rate-input .step-btn:hover{background:#e7eded}
+
+/* depth */
+.depth{margin:10px 0 4px;padding:14px 14px 10px;background:#fafcfc;border:1px solid var(--line-2);border-radius:12px}
+.depth-bars{display:flex;align-items:flex-end;gap:4px;height:50px}
+.depth-bars .b{flex:1;border-radius:3px 3px 0 0;background:#d6e0e2;transition:.12s}
+.depth-bars .b.mkt{background:var(--petrol-300)}
+.depth-bars .b.you{background:var(--petrol)}
+.depth-axis{display:flex;justify-content:space-between;font-size:10px;color:var(--faint);margin-top:7px}
+.fill-likely{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;margin-top:2px}
+.fill-likely .dot{width:7px;height:7px;border-radius:50%}
+
+.sum{border:1px solid var(--line-2);border-radius:12px;overflow:hidden;margin:18px 0 16px}
+.sum .sr{display:flex;justify-content:space-between;padding:11px 15px;font-size:13px;border-bottom:1px solid var(--line-2)}
+.sum .sr:last-child{border-bottom:none}.sum .sr .lbl{color:var(--muted)}.sum .sr .val{font-weight:600;font-family:"IBM Plex Mono"}
+.sum .sr.total{background:#f5f8f8}
+.health{margin:4px 0 0}
+.health-top{display:flex;justify-content:space-between;font-size:11px;color:var(--faint);margin-bottom:5px}
+.track{height:7px;border-radius:6px;background:#eef1f1;position:relative}
+.fill{height:100%;border-radius:6px}.fill.green{background:#1fae6e}.fill.amber{background:#cf9a1d}.fill.red{background:#cf5a5a}
+.marker{position:absolute;top:-3px;width:2px;height:13px;background:#b9c3c5}.marker.liq{background:#d98a8a}
+
+/* position detail */
+.pd-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
+.pd-cell{background:#fafcfc;border:1px solid var(--line-2);border-radius:11px;padding:13px 15px}
+.pd-cell .k{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.3px}
+.pd-cell .v{font-size:17px;font-weight:600;margin-top:3px}
+.fills{border:1px solid var(--line-2);border-radius:11px;overflow:hidden;margin-bottom:16px}
+.fill-row{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;font-size:12.5px;border-bottom:1px solid var(--line-2)}
+.fill-row:last-child{border-bottom:none}
+.fill-row .who{display:flex;align-items:center;gap:9px}
+.fill-row .av{width:22px;height:22px;border-radius:6px;background:var(--petrol);color:#fff;display:grid;place-items:center;font-size:9px;font-weight:700}
+
+/* toast */
+.toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:13px 20px;border-radius:11px;font-size:13px;font-weight:500;box-shadow:0 12px 30px -8px rgba(0,0,0,.4);opacity:0;transition:.25s;z-index:200;display:flex;align-items:center;gap:9px;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.toast svg{width:17px;height:17px;color:#3fbf9a}
+
+@media(max-width:1000px){
+  .app{grid-template-columns:1fr}.sidebar{position:relative;height:auto;flex-direction:row;align-items:center;padding:12px}
+  .nav{flex-direction:row;margin-left:auto}.setup-card,.brand-sub{display:none}
+  .panels{grid-template-columns:1fr}.stat-strip{grid-template-columns:1fr 1fr}
+  .mkt-head,.mkt-row{grid-template-columns:1.4fr 1fr auto}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark"></div><div><div class="brand-name">Triora</div><div class="brand-sub">Tri-party lending</div></div></div>
+    <nav class="nav" id="nav">
+      <button class="nav-item" data-view="markets">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"></path></svg>Markets</button>
+      <button class="nav-item" data-view="portfolio">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="1"></rect><rect x="13" y="3" width="8" height="5" rx="1"></rect><rect x="13" y="10" width="8" height="11" rx="1"></rect><rect x="3" y="13" width="8" height="8" rx="1"></rect></svg>Portfolio</button>
+      <button class="nav-item active" data-view="tokenize">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 6v6c0 4 3 6.5 8 8 5-1.5 8-4 8-8V6z"></path><path d="M9 12l2 2 4-4"></path></svg>Tokenize</button>
+      <button class="nav-item" data-view="account">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 4-6 8-6s8 2 8 6"></path></svg>Account</button>
+    </nav>
+    <div class="setup-card" id="setupCard"><h4>Get started</h4>
+    <div class="setup-step done"><span class="tick">✓</span>Verify entity</div>
+    <div class="setup-step "><span class="tick">2</span>Tokenize collateral</div>
+    <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:11px" id="setupBtn">Tokenize assets</button></div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div><h1 id="pageTitle">Tokenize</h1><div class="sub" id="pageSub">Tokenize what you bring — once — to lend or borrow</div></div>
+      <div class="spacer"></div>
+      <div class="acct"><div><div class="nm">Northpeak Treasury</div><div class="ent">via AMINA Bank</div></div><div class="avatar">NT</div></div>
+      <a href="https://triora.up.railway.app/logout" title="Sign out" style="display:grid;place-items:center;width:38px;height:42px;border:1px solid var(--line);border-radius:10px;color:var(--muted);background:#fff;text-decoration:none">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:17px;height:17px"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5M21 12H9"></path></svg>
+      </a>
+    </header>
+    <main class="content" id="content">
+    <div class="banner" style="margin-bottom:22px">
+      <div class="bi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 5 6v6c0 4 3 6.5 7 8 4-1.5 7-4 7-8V6z"></path></svg></div>
+      <div style="flex:1"><h3>Bring your assets onto the ledger — once</h3>
+        <p>Triora is a ledger over your own custody. You tokenize what you bring into 1:1 accounting tokens (cBTC, cETH, cUSDC); real assets stay put under AMINA tri-party and move only once, at settlement. Tokenize collateral to borrow, tokenize USDC to lend.</p></div>
+    </div>
+    <div class="panels">
+    <div class="panel full">
+      <div class="panel-head"><h2>Tokenize collateral — to borrow</h2><div class="net">cBTC · cETH · cSOL</div></div>
+      <div style="padding:18px 20px">
+        <p style="margin:0 0 14px;color:var(--muted);font-size:13px">Lock BTC, ETH or SOL <b>once</b> and borrow against it many times. Your asset never leaves custody — the protocol works with a 1:1 token.</p>
+        <div class="tok-step"><span class="n">1</span><div><div class="st">Connect address &amp; read balance</div><div class="sd">Connect a custody vault or Safe — we read the on-chain balance. Nothing moves.</div></div></div><div class="tok-step"><span class="n">2</span><div><div class="st">Add AMINA as tri-party</div><div class="sd">AMINA takes control of the address via a control agreement (or as a co-signer on your Safe).</div></div></div><div class="tok-step"><span class="n">3</span><div><div class="st">Chainlink mints cBTC / cETH 1:1</div><div class="sd">Now it's reusable collateral. Go to Markets and Borrow USDC against it.</div></div></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;gap:14px">
+          <div class="tok-bal">Tokenized collateral<b>none yet</b></div>
+          <button class="btn btn-primary" id="tokColl">Tokenize collateral</button>
+        </div>
+      </div>
+    </div></div>
+    <div class="panels" style="margin-top:18px">
+    <div class="panel full">
+      <div class="panel-head"><h2>Tokenize USDC — to lend</h2><div class="net">cUSDC</div></div>
+      <div style="padding:18px 20px">
+        <p style="margin:0 0 14px;color:var(--muted);font-size:13px">To lend, first tokenize the USDC you want to deploy into <b>cUSDC</b>. Your real USDC stays in your custody and moves only once, at settlement.</p>
+        <div class="tok-step"><span class="n">1</span><div><div class="st">Connect USDC custody &amp; read balance</div><div class="sd">Connect Binance / Anchorage or a Safe — we read your USDC balance.</div></div></div><div class="tok-step"><span class="n">2</span><div><div class="st">Add AMINA as tri-party</div><div class="sd">AMINA goes tri-party over the USDC address so it can co-sign the single settlement transfer out.</div></div></div><div class="tok-step"><span class="n">3</span><div><div class="st">Chainlink mints cUSDC 1:1</div><div class="sd">cUSDC is your reserved liquidity, available to lend. Go to Markets and Lend.</div></div></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;gap:14px">
+          <div class="tok-bal">cUSDC available to lend<b>$0</b></div>
+          <button class="btn btn-primary" id="tokUsdc">Tokenize USDC</button>
+        </div>
+      </div>
+    </div></div></main>
+  </div>
+</div>
+
+<div class="overlay" id="overlay"></div>
+<div class="toast" id="toast"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m20 6-11 11-5-5"></path></svg><span id="toastMsg">Entity verified by AMINA</span></div>
+
+<script>
+/* ===== DATA ===== */
+const fr = n => "$" + Math.round(n).toLocaleString("en-US");
+const frM = n => "$" + (n/1e6).toFixed(n>=1e7?0:1) + "M";
+const prices = {BTC:61200, ETH:3050, SOL:148};
+const names  = {BTC:"Bitcoin", ETH:"Ethereum", SOL:"Solana"};
+const MAX_LTV = 70, LIQ = 80;
+const markets = [
+  {m:"BTC", lendApy:6.2, borrowApr:7.8, liq:42e6},
+  {m:"ETH", lendApy:5.5, borrowApr:7.1, liq:28e6},
+  {m:"SOL", lendApy:8.8, borrowApr:10.2, liq:9e6},
+];
+const counterpartiesLend = ["Helvetia Capital","Zürcher Digital","Alpine Treasury","Geneva Yield"];
+const counterpartiesBorrow = ["Meridian Labs","Northwind DAO","Lakeside Capital","Coastal Holdings"];
+
+/* ===== STATE ===== */
+let state = {
+  view:"markets",
+  kyc:false,
+  custody:false,
+  tokenized:{BTC:0, ETH:0, SOL:0},
+  holdings:{BTC:8.5, ETH:120, SOL:2000},
+  custodyUsdc:5000000, reservedUsdc:0,
+  positions:[], // {id,type,market,amount,rate,rateMode,fillMode,status,fills,ltv,hf,health,ts}
+  addresses:[], // {addr,mode,custodian,use,status}
+  history:[     // closed / settled deals
+    {type:"borrow", market:"BTC", amount:120000, rate:7.5, fillMode:"single",  status:"Repaid", date:"12 May 2026"},
+    {type:"lend",   market:"ETH", amount:300000, rate:5.8, fillMode:"partial", status:"Closed", date:"28 Apr 2026"},
+    {type:"borrow", market:"ETH", amount:80000,  rate:6.9, fillMode:"single",  status:"Repaid", date:"15 Apr 2026"},
+    {type:"lend",   market:"BTC", amount:500000, rate:6.4, fillMode:"partial", status:"Settled",date:"02 Apr 2026"},
+  ],
+};
+let pid=1;
+
+/* ===== ICONS ===== */
+const ic={
+  info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
+  shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 5 6v6c0 4 3 6.5 7 8 4-1.5 7-4 7-8V6z"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>',
+  spark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l3 3M16 16l3 3M19 5l-3 3M8 16l-3 3"/></svg>',
+};
+const dot = a => `<div class="ic ic-${a.toLowerCase()}">${a==='BTC'?'BT':a==='ETH'?'ET':a==='SOL'?'SO':'$'}</div>`;
+const cdot = a => `<div class="ic ic-${a.toLowerCase()}">c${a[0]}</div>`;
+const healthOf = ltv => ltv<55?"Healthy":ltv<68?"Watch":"Critical";
+const fillClass = h => h==="Healthy"?"green":h==="Watch"?"amber":"red";
+const tagClass  = h => h==="Healthy"?"t-green":h==="Watch"?"t-amber":"t-red";
+
+/* ===== HELPERS ===== */
+function collateralValue(){ return ["BTC","ETH","SOL"].reduce((s,a)=>s+state.tokenized[a]*prices[a],0); }
+function borrowedTotal(){ return state.positions.filter(p=>p.type==='borrow').reduce((s,p)=>s+p.amount,0); }
+function borrowCapacity(){ return collateralValue()*MAX_LTV/100 - borrowedTotal(); }
+function suppliedTotal(){ return state.positions.filter(p=>p.type==='lend').reduce((s,p)=>s+p.amount,0); }
+function hasTokenized(){ return collateralValue()>0; }
+
+/* ===== ROUTER ===== */
+const titles={markets:["Markets","Lend USDC or borrow against tokenized collateral"],portfolio:["Portfolio","Your positions, history and matching status"],tokenize:["Tokenize","Tokenize what you bring — once — to lend or borrow"],account:["Account","Your entity, connected addresses and tokenized balances"]};
+function render(){
+  document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===state.view));
+  document.getElementById("pageTitle").textContent=titles[state.view][0];
+  document.getElementById("pageSub").textContent=titles[state.view][1];
+  renderSetupCard();
+  const c=document.getElementById("content");
+  if(state.view==="markets") c.innerHTML=viewMarkets();
+  else if(state.view==="portfolio") c.innerHTML=viewPortfolio();
+  else if(state.view==="tokenize") c.innerHTML=viewTokenize();
+  else if(state.view==="account") c.innerHTML=viewAccount();
+  wire();
+}
+function renderSetupCard(){
+  const el=document.getElementById("setupCard");
+  if(state.kyc && state.custody && hasTokenized()){
+    el.innerHTML=`<h4>Setup complete</h4>
+      <div class="setup-step done"><span class="tick">✓</span>Entity verified</div>
+      <div class="setup-step done"><span class="tick">✓</span>Collateral tokenized</div>`;
+    return;
+  }
+  el.innerHTML=`<h4>Get started</h4>
+    <div class="setup-step ${state.kyc?'done':''}"><span class="tick">${state.kyc?'✓':'1'}</span>Verify entity</div>
+    <div class="setup-step ${hasTokenized()?'done':''}"><span class="tick">${hasTokenized()?'✓':'2'}</span>Tokenize collateral</div>
+    <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:11px" id="setupBtn">${state.kyc?'Tokenize assets':'Verify entity'}</button>`;
+}
+
+/* ===== MARKETS ===== */
+function viewMarkets(){
+  const cVal=collateralValue();
+  const chips=[];
+  ["BTC","ETH","SOL"].forEach(a=>{ if(state.tokenized[a]>0) chips.push(
+    `<div class="chip">${cdot(a)}<div><div class="k">c${a} collateral</div><div class="v mono">${state.tokenized[a]} <span class="s">≈ ${fr(state.tokenized[a]*prices[a])}</span></div></div></div>`);});
+  if(state.reservedUsdc>0) chips.push(`<div class="chip">${cdot('USDC').replace('cU','c$')}<div><div class="k">cUSDC available</div><div class="v mono">${fr(state.reservedUsdc)} <span class="s">to lend</span></div></div></div>`);
+  if(hasTokenized()) chips.push(`<div class="chip">${dot('USDC')}<div><div class="k">Borrow capacity</div><div class="v mono vg" style="color:var(--green)">${fr(Math.max(borrowCapacity(),0))}</div></div></div>`);
+  if(chips.length===0) chips.push(`<div class="chip" style="color:var(--muted)"><div><div class="k">Protocol balance</div><div class="v" style="font-size:13px;font-weight:500">Nothing tokenized yet</div></div></div>`);
+  const balStrip=`<div class="bal">${chips.join("")}<button class="btn btn-out tok-btn" data-go="tokenize">${ic.plus}Tokenize assets</button></div>`;
+
+  const banner = (!state.kyc || !hasTokenized()) ? `
+    <div class="banner">
+      <div class="bi">${ic.shield}</div>
+      <div style="flex:1"><h3>${!state.kyc?'Verify your entity to begin':'Tokenize to lend or borrow'}</h3>
+        <p>${!state.kyc?'AMINA screens and approves your institution under its FINMA licence.':'Tokenize collateral (cBTC/cETH) to borrow, or tokenize USDC (cUSDC) to lend. Set up once, on the Tokenize tab.'}</p></div>
+      ${!state.kyc?`<button class="btn btn-primary" id="bannerBtn">Verify entity</button>`:`<button class="btn btn-primary" data-go="tokenize">Go to Tokenize</button>`}
+    </div>` : "";
+
+  const rows=markets.map(mk=>{
+    return `<div class="mkt-row">
+      <div class="mkt-asset">${dot(mk.m)}<div><div class="nm">USDC</div><div class="sub">${names[mk.m]}-backed market</div></div></div>
+      <div class="mkt-col"><div class="v mono">${frM(mk.liq)}</div><div class="l">Total liquidity</div></div>
+      <div class="mkt-actions">
+        <button class="btn btn-ghost btn-sm" data-order="lend:${mk.m}">Lend <b style="color:var(--green);margin-left:3px">${mk.lendApy}%</b></button>
+        <button class="btn btn-primary btn-sm" data-order="borrow:${mk.m}">Borrow <b style="margin-left:3px">${mk.borrowApr}%</b></button>
+      </div>
+    </div>`;
+  }).join("");
+
+  return `${banner}${balStrip}
+    <div class="mkt">
+      <div class="mkt-head"><span>Market</span><span>Total liquidity</span><span style="text-align:right">Lend / Borrow APY</span></div>
+      ${rows}
+    </div>`;
+}
+
+/* ===== PORTFOLIO ===== */
+function viewPortfolio(){
+  const supplied=suppliedTotal(), borrowed=borrowedTotal();
+  const lendPos=state.positions.filter(p=>p.type==='lend');
+  const borrowPos=state.positions.filter(p=>p.type==='borrow');
+  const minHf = borrowPos.length?Math.min(...borrowPos.map(p=>p.hf)):null;
+
+  const posRow=p=>{
+    const matching = p.status==='matching';
+    const filled = p.fills.reduce((s,f)=>s+f.amount,0);
+    const sub = matching
+      ? `<span class="spin"></span> Matching… ${p.fillMode==='partial'?`${p.fills.length} fill(s)`:'finding counterparty'}`
+      : (p.type==='borrow'
+          ? `HF <b class="mono">${p.hf.toFixed(2)}</b> · <span class="tag ${tagClass(p.health)}" style="padding:1px 7px">${p.health}</span>`
+          : `${p.fills.length} counterpart${p.fills.length===1?'y':'ies'} · ${p.rateMode==='custom'?'limit':'market'}`);
+    return `<div class="prow" data-pos="${p.id}">
+      ${dot(p.market)}
+      <div><div class="nm">USDC · ${names[p.market]}-backed <span class="tag ${p.type==='lend'?'t-lend':'t-borrow'}">${p.type}</span></div><div class="sub">${sub}</div></div>
+      <div class="num"><div class="big mono">${fr(p.amount)}</div><div class="sml">${p.rate}% ${p.type==='lend'?'APY':'APR'}</div></div>
+      <span style="color:var(--faint)">›</span>
+    </div>`;
+  };
+
+  const lendPanel = `<div class="panel"><div class="panel-head"><h2>You are lending</h2><div class="net">Total <b>${fr(supplied)}</b></div></div>
+    ${lendPos.length?lendPos.map(posRow).join(""):`<div class="empty"><h4>No lending positions</h4><p>Supply USDC to a market to start earning.</p><button class="btn btn-primary" data-go="markets">Go to markets</button></div>`}</div>`;
+  const borrowPanel = `<div class="panel"><div class="panel-head"><h2>You are borrowing</h2><div class="net">Owed <b>${fr(borrowed)}</b></div></div>
+    ${borrowPos.length?borrowPos.map(posRow).join(""):`<div class="empty"><h4>No loans</h4><p>Borrow USDC against tokenized collateral.</p><button class="btn btn-primary" data-go="markets">Go to markets</button></div>`}</div>`;
+
+  const histStatusClass = s => s==='Repaid'||s==='Settled'||s==='Closed' ? 't-green' : 't-amber';
+  const histRows = state.history.length ? state.history.map(h=>`
+    <div class="prow" style="cursor:default">
+      ${dot(h.market)}
+      <div><div class="nm">USDC · ${names[h.market]}-backed <span class="tag ${h.type==='lend'?'t-lend':'t-borrow'}">${h.type}</span></div><div class="sub">${h.date} · ${h.fillMode==='partial'?'partial fills':'single batch'}</div></div>
+      <div class="num"><div class="big mono">${fr(h.amount)}</div><div class="sml">${h.rate}% ${h.type==='lend'?'APY':'APR'}</div></div>
+      <span class="tag ${histStatusClass(h.status)}" style="padding:2px 9px">${h.status}</span>
+    </div>`).join("")
+    : `<div class="empty"><p>No closed deals yet.</p></div>`;
+  const historyPanel = `<div class="panel full"><div class="panel-head"><h2>Loan history</h2><div class="net">${state.history.length} closed deal${state.history.length===1?'':'s'}</div></div>${histRows}</div>`;
+
+  return `
+    <div class="stat-strip">
+      <div class="stat"><div class="k">Supplied</div><div class="v mono">${fr(supplied)}</div><div class="d">${lendPos.length} position${lendPos.length===1?'':'s'}</div></div>
+      <div class="stat"><div class="k">Borrowed</div><div class="v mono">${fr(borrowed)}</div><div class="d">${borrowPos.length} loan${borrowPos.length===1?'':'s'}</div></div>
+      <div class="stat"><div class="k">Collateral locked</div><div class="v mono">${fr(collateralValue())}</div><div class="d">tokenized 1:1</div></div>
+      <div class="stat"><div class="k">Health factor</div><div class="v mono" style="color:${minHf===null?'var(--ink)':minHf<1.4?'var(--amber)':'var(--green)'}">${minHf===null?'—':minHf.toFixed(2)}</div><div class="d">liquidation at 1.00</div></div>
+    </div>
+    <div class="panels">${borrowPanel}${lendPanel}</div>
+    <div class="panels" style="margin-top:18px">${historyPanel}</div>`;
+}
+
+/* ===== TOKENIZE (onboarding + explainer) ===== */
+function viewTokenize(){
+  const collList = ["BTC","ETH","SOL"].filter(a=>state.tokenized[a]>0).map(a=>`${state.tokenized[a]} c${a}`).join(" · ") || "none yet";
+  const stepRow = s => `<div class="tok-step"><span class="n">${s.n}</span><div><div class="st">${s.t}</div><div class="sd">${s.d}</div></div></div>`;
+
+  const collateral = `
+    <div class="panel full">
+      <div class="panel-head"><h2>Tokenize collateral — to borrow</h2><div class="net">cBTC · cETH · cSOL</div></div>
+      <div style="padding:18px 20px">
+        <p style="margin:0 0 14px;color:var(--muted);font-size:13px">Lock BTC, ETH or SOL <b>once</b> and borrow against it many times. Your asset never leaves custody — the protocol works with a 1:1 token.</p>
+        ${[{n:1,t:"Connect address & read balance",d:"Connect a custody vault or Safe — we read the on-chain balance. Nothing moves."},
+           {n:2,t:"Add AMINA as tri-party",d:"AMINA takes control of the address via a control agreement (or as a co-signer on your Safe)."},
+           {n:3,t:"Chainlink mints cBTC / cETH 1:1",d:"Now it's reusable collateral. Go to Markets and Borrow USDC against it."}].map(stepRow).join("")}
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;gap:14px">
+          <div class="tok-bal">Tokenized collateral<b>${collList}</b></div>
+          <button class="btn btn-primary" id="tokColl">Tokenize collateral</button>
+        </div>
+      </div>
+    </div>`;
+
+  const liquidity = `
+    <div class="panel full">
+      <div class="panel-head"><h2>Tokenize USDC — to lend</h2><div class="net">cUSDC</div></div>
+      <div style="padding:18px 20px">
+        <p style="margin:0 0 14px;color:var(--muted);font-size:13px">To lend, first tokenize the USDC you want to deploy into <b>cUSDC</b>. Your real USDC stays in your custody and moves only once, at settlement.</p>
+        ${[{n:1,t:"Connect USDC custody & read balance",d:"Connect Binance / Anchorage or a Safe — we read your USDC balance."},
+           {n:2,t:"Add AMINA as tri-party",d:"AMINA goes tri-party over the USDC address so it can co-sign the single settlement transfer out."},
+           {n:3,t:"Chainlink mints cUSDC 1:1",d:"cUSDC is your reserved liquidity, available to lend. Go to Markets and Lend."}].map(stepRow).join("")}
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;gap:14px">
+          <div class="tok-bal">cUSDC available to lend<b>${fr(state.reservedUsdc)}</b></div>
+          <button class="btn btn-primary" id="tokUsdc">Tokenize USDC</button>
+        </div>
+      </div>
+    </div>`;
+
+  return `
+    <div class="banner" style="margin-bottom:22px">
+      <div class="bi">${ic.shield}</div>
+      <div style="flex:1"><h3>Bring your assets onto the ledger — once</h3>
+        <p>Triora is a ledger over your own custody. You tokenize what you bring into 1:1 accounting tokens (cBTC, cETH, cUSDC); real assets stay put under AMINA tri-party and move only once, at settlement. Tokenize collateral to borrow, tokenize USDC to lend.</p></div>
+    </div>
+    <div class="panels">${collateral}</div>
+    <div class="panels" style="margin-top:18px">${liquidity}</div>`;
+}
+
+/* ===== ACCOUNT ===== */
+function viewAccount(){
+  const entity=[
+    ["Legal entity","Northpeak Treasury Ltd"],
+    ["Jurisdiction","Switzerland"],
+    ["LEI","506700GE1G29325QX363"],
+    ["Account","via AMINA Bank · FINMA"],
+  ];
+  const entityRows=entity.map(e=>`<div class="prow" style="grid-template-columns:1fr auto;cursor:default"><div class="nm" style="font-weight:500;color:var(--muted)">${e[0]}</div><div class="nm mono" style="font-weight:600">${e[1]}</div></div>`).join("");
+
+  const addrRows = state.addresses.length ? state.addresses.map(a=>`
+    <div class="prow" style="cursor:default">
+      <div class="ic" style="background:${a.mode==='safe'?'#1e2733':'#5a3a13'}">${a.mode==='safe'?'SF':a.custodian.slice(0,2).toUpperCase()}</div>
+      <div><div class="nm mono">${a.addr.slice(0,8)}…${a.addr.slice(-4)}</div><div class="sub">${a.mode==='safe'?'Smart account (Safe)':'Qualified custodian · '+a.custodian} · ${a.use}</div></div>
+      <span class="tag t-green" style="padding:2px 9px">AMINA tri-party</span>
+      <span style="color:var(--faint)">›</span>
+    </div>`).join("")
+    : `<div class="empty"><h4>No addresses connected</h4><p>Tokenize collateral or reserve USDC to connect a tri-party address.</p></div>`;
+
+  const tokChips=[];
+  ["BTC","ETH","SOL"].forEach(a=>{ if(state.tokenized[a]>0) tokChips.push(
+    `<div class="prow" style="grid-template-columns:auto 1fr auto;cursor:default">${cdot(a)}<div><div class="nm">c${a}</div><div class="sub">tokenized collateral · ${a} 1:1</div></div><div class="num"><div class="big mono">${state.tokenized[a]} c${a}</div><div class="sml">${fr(state.tokenized[a]*prices[a])}</div></div></div>`);});
+  tokChips.push(`<div class="prow" style="grid-template-columns:auto 1fr auto;cursor:default">${cdot('USDC').replace('cU','c$')}<div><div class="nm">cUSDC</div><div class="sub">reserved liquidity · available to lend</div></div><div class="num"><div class="big mono">${fr(state.reservedUsdc)}</div><div class="sml">of ${fr(state.custodyUsdc)} in custody</div></div></div>`);
+
+  return `
+    <div class="panels">
+      <div class="panel full">
+        <div class="panel-head"><h2>Entity</h2><div class="net">${state.kyc?'<span class="tag t-green" style="padding:2px 9px">Verified by AMINA</span>':'<span class="tag t-amber" style="padding:2px 9px">Not verified</span>'}</div></div>
+        ${entityRows}
+        ${!state.kyc?`<div style="padding:14px 20px"><button class="btn btn-primary" id="acctVerify">Verify entity</button></div>`:''}
+      </div>
+      <div class="panel full">
+        <div class="panel-head"><h2>Connected addresses</h2><div class="net">${state.addresses.length} address${state.addresses.length===1?'':'es'} · AMINA tri-party</div></div>
+        ${addrRows}
+      </div>
+      <div class="panel full">
+        <div class="panel-head"><h2>Tokenized &amp; reserved</h2><div class="net">accounting tokens</div></div>
+        ${tokChips.join("")}
+      </div>
+    </div>`;
+}
+
+
+/* ===== WIRING ===== */
+function wire(){
+  document.querySelectorAll("[data-order]").forEach(b=>b.onclick=()=>{const[t,m]=b.dataset.order.split(":");startOrder(t,m);});
+  document.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{state.view=b.dataset.go;render();});
+  document.querySelectorAll("[data-pos]").forEach(r=>r.onclick=()=>openPosition(+r.dataset.pos));
+  const tc=document.getElementById("tokColl"); if(tc)tc.onclick=()=>ensureKyc(()=>tokenizeFlow());
+  const tu=document.getElementById("tokUsdc"); if(tu)tu.onclick=()=>ensureKyc(()=>tokenizeFlow(null,{kind:'liquidity'}));
+  const bb=document.getElementById("bannerBtn"); if(bb)bb.onclick=()=>onboardKyc();
+  const sb=document.getElementById("setupBtn"); if(sb)sb.onclick=()=>{ if(!state.kyc) onboardKyc(); else { state.view='tokenize'; render(); } };
+  const av=document.getElementById("acctVerify"); if(av)av.onclick=()=>onboardKyc();
+}
+document.getElementById("nav").addEventListener("click",e=>{const i=e.target.closest(".nav-item");if(i){state.view=i.dataset.view;render();}});
+
+/* ===== MODAL CORE ===== */
+const overlay=document.getElementById("overlay");
+function closeModal(){overlay.classList.remove("show");overlay.innerHTML="";}
+overlay.addEventListener("click",e=>{if(e.target===overlay)closeModal();});
+
+/* ===== 1. KYC ===== */
+function ensureKyc(cb){ state.kyc?cb():onboardKyc(cb); }
+function onboardKyc(then){
+  overlay.classList.add("show");
+  overlay.innerHTML=`<div class="modal">
+    <div class="modal-head"><div><h2>Verify entity <span class="actor-tag">AMINA</span></h2><p>KYB · screened and approved by AMINA under its FINMA licence</p></div><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Legal entity name</label><input value="Northpeak Treasury Ltd"></div>
+      <div class="field"><label>Jurisdiction</label><select><option>Switzerland</option><option>Liechtenstein</option><option>Cayman Islands</option><option>UAE</option></select></div>
+      <div class="field"><label>LEI</label><input value="506700GE1G29325QX363"></div>
+      <div class="info-card">${ic.info}<div>P2P only collects this data through the UI. The approval decision sits with <b>AMINA</b>, the regulated broker — not the platform.</div></div>
+      <button class="btn btn-primary btn-block" id="kycBtn">Submit for verification</button>
+    </div></div>`;
+  document.getElementById("kycBtn").onclick=()=>{
+    state.kyc=true; closeModal(); render(); toast("Entity verified by AMINA");
+    setTimeout(()=>then&&then(),120);
+  };
+}
+
+/* ===== 2. TOKENIZATION ===== */
+function tokenizeFlow(then, opts){
+  opts=opts||{}; const isLiq = opts.kind==='liquidity';
+  state.triParty = state.triParty || {};            // address -> true (active, reusable)
+  const VAULT = "0x9F2c4A7b3E8d1F60aB59C2dEa1B8c2"; // example custodian vault
+  const SAFE  = "0x21Ab9C4f7D2e3A85b06C1fE9d4A77c33"; // example Safe smart account
+  let step=0, asset=isLiq?"USDC":(opts.preset||"BTC"), amount=0, mode="custodian"; // custodian | safe
+  let addr="", reading=false, read=false, triPending=false, safeTx="";
+  const short = a => a ? a.slice(0,6)+"…"+a.slice(-4) : "—";
+  const triActive = () => !!state.triParty[addr];
+
+  function doRead(){ reading=true; read=false; rebuild(); setTimeout(()=>{ reading=false; read=true; if(!amount) amount=isLiq?state.custodyUsdc:state.holdings[asset]; rebuild(); }, 850); }
+  function recordAddress(){ if(!state.addresses.find(a=>a.addr===addr)) state.addresses.push({addr, mode, custodian: mode==='safe'?'Safe':(isLiq?'Binance':'BitGo'), use: isLiq?'USDC liquidity':'collateral', status:'active'}); }
+  function requestTri(){ triPending=true; rebuild(); setTimeout(()=>{ triPending=false; state.triParty[addr]=true; recordAddress(); rebuild(); toast("AMINA co-signed — tri-party active on your address"); }, 1700); }
+  function signSafe(){ triPending=true; safeTx="0x3f9a2c7e8b4d10c6F2a9bE71d33C4ab1"; rebuild(); setTimeout(()=>{ triPending=false; state.triParty[addr]=true; recordAddress(); rebuild(); toast("Transaction confirmed — AMINA added as Safe co-signer"); }, 1700); }
+
+  const steps=[
+    /* 1 — pick source, connect / paste address, parse balances */
+    {t:"Connect address", next:()=>read && amount>0, label:"Continue", pane:()=>`
+      <h3>${isLiq?'Connect your USDC custody':'Connect your collateral address'}</h3>
+      <p class="lead">${isLiq?'Pick where your USDC sits, then connect or paste the address — we read the balance on-chain. Your USDC never moves until settlement.':'Pick where your collateral lives, then connect or paste the address — we read the balance on-chain. Nothing is moved.'}</p>
+      <div class="seg" id="srcSeg">
+        <button class="${mode==='custodian'?'on':''}" data-src="custodian">Qualified custodian<span class="s">${isLiq?'Binance / Anchorage':'BitGo / Anchorage'} · control agreement</span></button>
+        <button class="${mode==='safe'?'on':''}" data-src="safe">Smart account (Safe)<span class="s">on-chain co-signer · self-serve</span></button>
+      </div>
+      <div class="field" style="margin-top:14px"><label>${mode==='safe'?'Safe address':(isLiq?'USDC custody address':'Custody vault address')}</label>
+        <div style="display:flex;gap:8px"><input id="tkAddr" value="${addr}" placeholder="0x…" style="flex:1">
+          <button class="btn btn-out" id="tkConnect">${mode==='safe'?'Connect Safe':'Connect custody'}</button></div></div>
+      <button class="btn btn-ghost btn-sm" id="tkRead">Read balance</button>
+      ${reading?`<div class="info-card" style="margin-top:16px"><span class="spin"></span><div>Reading balance at ${short(addr)}…</div></div>`:""}
+      ${read?(isLiq?`
+        <div class="olabel" style="margin-top:18px">Detected at ${short(addr)} <span class="hint">${mode==='safe'?'Safe smart account':'Binance custody'}</span></div>
+        <div class="info-card" style="margin-bottom:14px">${dot('USDC')}<div style="margin-left:2px"><b>${fr(state.custodyUsdc)}</b> USDC available to reserve</div></div>
+        <div class="amount-box"><div class="top"><span>Amount to reserve</span><span>Available: ${fr(state.custodyUsdc)}</span></div>
+          <div class="inp"><input id="tkAmt" value="${amount.toLocaleString('en-US')}" inputmode="numeric"><span class="cur">USDC</span></div>
+          <div class="quick"><button data-tq="0.25">25%</button><button data-tq="0.5">50%</button><button data-tq="1">Max</button></div></div>`
+      :`
+        <div class="olabel" style="margin-top:18px">Detected at ${short(addr)} <span class="hint">${mode==='safe'?'Safe smart account':'BitGo vault'}</span></div>
+        <div class="choice">${["BTC","ETH","SOL"].map(a=>`<div class="opt ${asset===a?'sel':''}" data-as="${a}"><div class="ico ic-${a.toLowerCase()}">${a[0]}</div><div class="lab">${names[a]}</div><div class="sm">${state.holdings[a]} ${a}</div></div>`).join("")}</div>
+        <div class="amount-box" style="margin-top:16px"><div class="top"><span>Amount to lock</span><span>Detected: ${state.holdings[asset]} ${asset}</span></div>
+          <div class="inp"><input id="tkAmt" value="${amount}" inputmode="decimal"><span class="cur">${asset}</span></div>
+          <div class="quick"><button data-tq="0.5">50%</button><button data-tq="1">Max</button></div></div>`):""}`,
+      bind:()=>{
+        document.querySelectorAll("[data-src]").forEach(o=>o.onclick=()=>{ if(mode!==o.dataset.src){ mode=o.dataset.src; addr=""; read=false; reading=false; triPending=false; safeTx=""; rebuild(); }});
+        const ai=document.getElementById("tkAddr"); ai.oninput=e=>{addr=e.target.value.trim();};
+        document.getElementById("tkConnect").onclick=()=>{ addr=mode==='safe'?SAFE:VAULT; doRead(); };
+        document.getElementById("tkRead").onclick=()=>{ if(!addr){toast("Paste an address or connect first");return;} doRead(); };
+        document.querySelectorAll("[data-as]").forEach(o=>o.onclick=()=>{asset=o.dataset.as;amount=state.holdings[asset];rebuild();});
+        document.querySelectorAll("[data-tq]").forEach(q=>q.onclick=()=>{ amount = isLiq ? Math.round(state.custodyUsdc*+q.dataset.tq) : +(state.holdings[asset]*+q.dataset.tq).toFixed(4); rebuild(); });
+        const am=document.getElementById("tkAmt"); if(am)am.oninput=e=>{ amount = isLiq ? (+e.target.value.replace(/[^\d]/g,"")||0) : (+e.target.value||0); };
+      }},
+
+    /* 2 — add AMINA: control agreement (custodian) OR on-chain co-signer (Safe) */
+    {t:()=>mode==='safe'?"Add AMINA co-signer":"Add AMINA tri-party", next:()=>triActive(), label:"Continue", pane:()=> mode==='safe' ? `
+      <h3>Add AMINA as co-signer <span class="actor-tag">AMINA</span></h3>
+      <p class="lead">AMINA is added as a required co-signer on your Safe through an on-chain transaction you sign yourself — no relationship manager, fully self-serve.</p>
+      <div class="sum">
+        <div class="sr"><span class="lbl">Safe</span><span class="val" style="font-size:12px">${short(addr)}</span></div>
+        <div class="sr"><span class="lbl">Signers</span><span class="val">${triActive()?'3 — you (2) + AMINA':'2 — you only'}</span></div>
+        <div class="sr"><span class="lbl">Policy</span><span class="val">AMINA required on transfers</span></div>
+        <div class="sr total"><span class="lbl">Status</span><span class="val" style="color:${triActive()?'var(--green)':triPending?'var(--amber)':'var(--muted)'}">${triActive()?'Confirmed':triPending?'Submitting tx':'Not set'}</span></div>
+      </div>
+      ${triActive()
+        ? `<div class="info-card">${ic.shield}<div><b>AMINA is co-signer.</b> A Safe guard now requires AMINA's signature on every outgoing transfer. Tx ${short(safeTx)}.</div></div>`
+        : triPending
+          ? `<div class="info-card" style="margin-bottom:8px"><span class="spin"></span><div>Awaiting your wallet signature, then submitting the owner + guard update on-chain… ${safeTx?'('+short(safeTx)+')':''}</div></div>`
+          : `<button class="btn btn-primary btn-block" id="tkSignSafe" style="margin-bottom:14px">Sign transaction in wallet</button>`}
+      <div class="info-card">${ic.info}<div>Enforced <b>on-chain</b> via a Safe guard — faster and self-serve, but the security interest is contract-enforced rather than a custodian control agreement.</div></div>`
+    : `
+      <h3>Add AMINA as tri-party <span class="actor-tag">AMINA</span></h3>
+      <p class="lead">${isLiq?'To reserve USDC liquidity, AMINA takes tri-party control of this address through a control agreement — so it can co-sign the single settlement transfer out of your custody.':'To use this address as collateral, AMINA takes tri-party control through a collateral control agreement — the security interest that survives bankruptcy, not just a multisig key.'}</p>
+      <div class="sum">
+        <div class="sr"><span class="lbl">Address</span><span class="val" style="font-size:12px">${short(addr)}</span></div>
+        <div class="sr"><span class="lbl">Custodian</span><span class="val">${isLiq?'Binance':'BitGo'}</span></div>
+        <div class="sr total"><span class="lbl">Tri-party status</span><span class="val" style="color:${triActive()?'var(--green)':triPending?'var(--amber)':'var(--muted)'}">${triActive()?'Active':triPending?'Awaiting co-signature':'Not set'}</span></div>
+      </div>
+      ${triActive()
+        ? `<div class="info-card">${ic.shield}<div><b>Tri-party active.</b> AMINA is collateral agent on this address. This agreement is reused for every asset at this address.</div></div>`
+        : triPending
+          ? `<div class="info-card" style="margin-bottom:8px"><span class="spin"></span><div>AMINA is reviewing and counter-signing the control agreement. The custodian then registers AMINA's tri-party control.</div></div>`
+          : `<button class="btn btn-primary btn-block" id="tkReqTri" style="margin-bottom:14px">Request control agreement</button>`}
+      <div class="info-card">${ic.info}<div>Set <b>once per address</b>, then reused — future setups on this address skip this step. First-time setup is reviewed by your AMINA relationship manager. <a id="tkRm" href="#" style="color:var(--petrol);font-weight:600">Message your RM →</a></div></div>`,
+      bind:()=>{
+        const rq=document.getElementById("tkReqTri"); if(rq)rq.onclick=requestTri;
+        const ss=document.getElementById("tkSignSafe"); if(ss)ss.onclick=signSafe;
+        const rm=document.getElementById("tkRm"); if(rm)rm.onclick=e=>{e.preventDefault();toast("Opening your AMINA relationship manager chat…");};
+      }},
+
+    /* 3 — mint c-token (collateral) OR reserve cUSDC (liquidity) */
+    {t:isLiq?"Reserve liquidity":"Mint token", next:()=>true, label:()=> isLiq?('Reserve '+fr(amount)):('Mint '+amount+' c'+asset), pane:()=> isLiq?`
+      <h3>Reserve liquidity <span class="actor-tag cl">CHAINLINK</span></h3>
+      <p class="lead">Chainlink CRE confirms your reserved USDC and mints <b>cUSDC</b> 1:1. Your real USDC stays in custody and moves once, at settlement.</p>
+      <div class="sum">
+        <div class="sr"><span class="lbl">Reserving</span><span class="val">${fr(amount)}</span></div>
+        <div class="sr"><span class="lbl">${mode==='safe'?'Co-signer':'Tri-party'}</span><span class="val">${mode==='safe'?'AMINA · Safe':'AMINA · Binance'}</span></div>
+        <div class="sr total"><span class="lbl">You receive</span><span class="val">${fr(amount)} cUSDC</span></div>
+      </div>
+      <div class="info-card">${ic.info}<div><b>cUSDC is a reservation</b>, not a transfer — the protocol operates it without touching your real USDC. Money moves once, at loan settlement.</div></div>`
+    :`
+      <h3>Mint collateral token <span class="actor-tag cl">CHAINLINK</span></h3>
+      <p class="lead">Chainlink CRE confirms the asset on the tri-party address and mints <b>c${asset}</b> 1:1 into the protocol.</p>
+      <div class="sum">
+        <div class="sr"><span class="lbl">Locking</span><span class="val">${amount} ${asset}</span></div>
+        <div class="sr"><span class="lbl">Value</span><span class="val">${fr(amount*prices[asset])}</span></div>
+        <div class="sr"><span class="lbl">${mode==='safe'?'Co-signer':'Tri-party'}</span><span class="val">${mode==='safe'?'AMINA · Safe':'AMINA · BitGo'}</span></div>
+        <div class="sr total"><span class="lbl">You receive</span><span class="val">${amount} c${asset}</span></div>
+      </div>
+      <div class="info-card">${ic.info}<div>c${asset} is a standard ERC-20. You can borrow against it here — or natively in Aave / Morpho.</div></div>`},
+  ];
+
+  function rebuild(){
+    const s=steps[step];
+    const enabled = s.next ? s.next() : true;
+    const label = typeof s.label==='function' ? s.label() : (s.label||(step<steps.length-1?'Continue':'Finish'));
+    overlay.innerHTML=`<div class="modal wide">
+      <div class="modal-head"><div><h2>${isLiq?'Reserve USDC liquidity':'Tokenize assets'}</h2><p>${isLiq?'Connect USDC custody, add AMINA as tri-party, then reserve':'Read your address, add AMINA as tri-party, then mint'}</p></div><button class="x" onclick="closeModal()">×</button></div>
+      <div class="steps">${steps.map((st,i)=>`<div class="step ${i===step?'active':i<step?'done':''}"><div class="n">${i<step?'✓':i+1}</div>${typeof st.t==='function'?st.t():st.t}</div>`).join("")}</div>
+      <div class="step-pane">${s.pane()}</div>
+      <div class="modal-foot"><span class="left">Step ${step+1} of ${steps.length}</span>
+        <div class="foot-btns"><button class="btn btn-out" id="tkBack">${step===0?'Cancel':'Back'}</button>
+          <button class="btn btn-primary" id="tkNext" ${enabled?'':'disabled'}>${label}</button></div></div>
+    </div>`;
+    document.getElementById("tkNext").onclick=()=>{
+      if(!(s.next?s.next():true)) return;
+      if(step<steps.length-1){ step++; rebuild(); }
+      else {
+        if(isLiq){ state.reservedUsdc += amount; state.custody=true; closeModal(); render(); toast(`Reserved ${fr(amount)} cUSDC — real USDC stays in your custody`); }
+        else { state.tokenized[asset]=+(state.tokenized[asset]+amount).toFixed(4); state.custody=true; closeModal(); render(); toast(`Minted ${amount} c${asset} — collateral tokenized 1:1`); }
+        setTimeout(()=>then&&then(),120);
+      }
+    };
+    document.getElementById("tkBack").onclick=()=>{ if(step>0){step--;rebuild();} else closeModal(); };
+    s.bind&&s.bind();
+  }
+  overlay.classList.add("show"); rebuild();
+}
+
+/* ===== 3+4. ORDER FLOW (market/custom rate + single/partial fill) ===== */
+function startOrder(type, m){
+  if(!state.kyc) return onboardKyc(()=>startOrder(type,m));
+  openOrder(type, m);
+}
+function openLocked(type, m){
+  const isLend = type==='lend';
+  overlay.classList.add("show");
+  overlay.innerHTML=`<div class="modal">
+    <div class="modal-head"><div><h2>${isLend?'Lend USDC':'Borrow USDC'}</h2><p>${names[m]}-backed market</p></div><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="info-card" style="margin-bottom:18px">${ic.info}<div>${isLend
+        ? `To lend you first need <b>tokenized USDC</b> (cUSDC). Tokenize the USDC you want to deploy — your real funds stay in your custody and move only once, at settlement.`
+        : `To borrow you first need <b>tokenized collateral</b> (cBTC / cETH). Lock an asset once, then borrow against it many times.`}</div></div>
+      <button class="btn btn-primary btn-block" id="lockedGo">${isLend?'Tokenize USDC':'Tokenize collateral'}</button>
+      <p style="text-align:center;font-size:11.5px;color:var(--faint);margin:12px 0 0">Takes you to the Tokenize tab</p>
+    </div></div>`;
+  document.getElementById("lockedGo").onclick=()=>{ closeModal(); state.view='tokenize'; render(); };
+}
+function openOrder(type, m){
+  const mk=markets.find(x=>x.m===m);
+  const marketRate = type==='lend'?mk.lendApy:mk.borrowApr;
+  const maxAmt = type==='lend'? state.reservedUsdc : Math.max(state.tokenized[m]*prices[m]*MAX_LTV/100,0);
+  if(maxAmt<=0) return openLocked(type, m);
+  let amount = Math.round(maxAmt*0.4/1000)*1000 || 50000;
+  let rateMode="market";       // market | custom
+  let rate=marketRate;
+  let fillMode="single";       // single | partial
+  overlay.classList.add("show");
+
+  function likelihood(){
+    // borrow: lower rate = harder to fill; lend: higher rate = harder to fill
+    const diff = type==='borrow' ? (rate - marketRate) : (marketRate - rate);
+    if(rateMode==='market'||diff>=0) return {t:"High",c:"var(--green)"};
+    if(diff>=-0.6) return {t:"Medium",c:"var(--amber)"};
+    return {t:"Low — may rest unfilled",c:"var(--red)"};
+  }
+  function depthBars(){
+    // 7 rate buckets around market; highlight market + user's rate
+    const lo=marketRate-1.5, bars=[];
+    for(let i=0;i<7;i++){
+      const r=+(lo+i*0.5).toFixed(1);
+      const h=18+Math.round(36*Math.exp(-Math.pow((r-marketRate)/0.9,2))); // bell around market
+      const isMkt=Math.abs(r-marketRate)<0.26;
+      const isYou=rateMode==='custom'&&Math.abs(r-rate)<0.26;
+      bars.push(`<div class="b ${isYou?'you':isMkt?'mkt':''}" style="height:${h}px" title="${r}%"></div>`);
+    }
+    return `<div class="depth"><div class="depth-bars">${bars.join("")}</div>
+      <div class="depth-axis"><span>${(lo).toFixed(1)}%</span><span>market ${marketRate}%</span><span>${(lo+3).toFixed(1)}%</span></div></div>`;
+  }
+  function build(){
+    const ltv = type==='borrow'? Math.round((borrowedTotal()+amount)/Math.max(collateralValue(),1)*100):0;
+    const health=healthOf(ltv), hf=(MAX_LTV/Math.max(ltv,1));
+    const lk=likelihood();
+    overlay.innerHTML=`<div class="modal wide">
+      <div class="modal-head"><div><h2>${type==='lend'?'Lend USDC':'Borrow USDC'}</h2><p>${type==='lend'?'into':'against'} ${names[m]}-backed market</p></div><button class="x" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div class="amount-box"><div class="top"><span>${type==='lend'?'Supply amount':'Borrow amount'}</span><span>Max ${fr(maxAmt)}</span></div>
+          <div class="inp"><input id="oAmt" value="${amount.toLocaleString('en-US')}" inputmode="numeric"><span class="cur">USDC</span></div>
+          <div class="quick"><button data-oq="${Math.round(maxAmt*.25)}">25%</button><button data-oq="${Math.round(maxAmt*.5)}">50%</button><button data-oq="${Math.round(maxAmt*.75)}">75%</button><button data-oq="${Math.round(maxAmt)}">Max</button></div>
+        </div>
+
+        <div class="olabel">Rate <span class="hint">market is ${marketRate}% ${type==='lend'?'APY':'APR'}</span></div>
+        <div class="seg" id="rateSeg">
+          <button class="${rateMode==='market'?'on':''}" data-rm="market">Market rate<span class="s">fill at the current ${marketRate}%</span></button>
+          <button class="${rateMode==='custom'?'on':''}" data-rm="custom">Custom rate<span class="s">set your own limit</span></button>
+        </div>
+        ${rateMode==='custom'?`
+          <div class="rate-input"><button class="step-btn" data-rs="-1">−</button><input id="oRate" value="${rate.toFixed(1)}" inputmode="decimal"><span class="pct">%</span><button class="step-btn" data-rs="1">+</button></div>
+          ${depthBars()}
+          <div class="fill-likely"><span class="dot" style="background:${lk.c}"></span><span style="color:${lk.c}">Fill likelihood: ${lk.t}</span></div>
+        `:depthBars()}
+
+        <div class="olabel" style="margin-top:16px">Fill</div>
+        <div class="seg" id="fillSeg">
+          <button class="${fillMode==='single'?'on':''}" data-fm="single">Single batch<span class="s">one counterparty · all-or-nothing</span></button>
+          <button class="${fillMode==='partial'?'on':''}" data-fm="partial">Partial fills<span class="s">accept from many</span></button>
+        </div>
+
+        ${type==='borrow'?`<div class="health" style="margin-top:16px">
+          <div class="health-top"><span>LTV ${ltv}%</span><span>Margin ${MAX_LTV}% · Liq ${LIQ}%</span></div>
+          <div class="track"><div class="fill ${fillClass(health)}" style="width:${Math.min(ltv,100)}%"></div><div class="marker" style="left:${MAX_LTV}%"></div><div class="marker liq" style="left:${LIQ}%"></div></div>
+        </div>`:''}
+
+        <div class="sum">
+          <div class="sr"><span class="lbl">Rate</span><span class="val">${(rateMode==='custom'?rate:marketRate).toFixed(1)}% ${rateMode==='custom'?'(limit)':'(market)'}</span></div>
+          ${type==='borrow'?`<div class="sr"><span class="lbl">Health factor</span><span class="val" style="color:${health==='Healthy'?'var(--green)':health==='Watch'?'var(--amber)':'var(--red)'}">${hf.toFixed(2)}</span></div>`
+            :`<div class="sr"><span class="lbl">Est. interest / yr</span><span class="val">${fr(amount*(rateMode==='custom'?rate:marketRate)/100)}</span></div>`}
+          <div class="sr total"><span class="lbl">${type==='lend'?'You supply':'You receive'}</span><span class="val">${fr(amount)} USDC</span></div>
+        </div>
+        <p style="font-size:11.5px;color:var(--faint);margin:0 2px 14px">Rules and limits are AMINA parameters. Real USDC moves once, at settlement, under AMINA's co-signature.</p>
+        <button class="btn btn-primary btn-block" id="oPlace">Place ${type} order</button>
+      </div></div>`;
+    // bind
+    document.querySelectorAll("[data-oq]").forEach(b=>b.onclick=()=>{amount=+b.dataset.oq;build();});
+    document.getElementById("oAmt").oninput=e=>{amount=+e.target.value.replace(/[^\d]/g,"")||0;};
+    document.querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{rateMode=b.dataset.rm; if(rateMode==='market')rate=marketRate; build();});
+    const rIn=document.getElementById("oRate"); if(rIn){ rIn.oninput=e=>{rate=+e.target.value||0;}; rIn.onblur=()=>build(); }
+    document.querySelectorAll("[data-rs]").forEach(b=>b.onclick=()=>{rate=+(rate+ +b.dataset.rs*0.1).toFixed(1); build();});
+    document.querySelectorAll("[data-fm]").forEach(b=>b.onclick=()=>{fillMode=b.dataset.fm;build();});
+    document.getElementById("oPlace").onclick=()=>{
+      const finalRate=+(rateMode==='custom'?rate:marketRate).toFixed(1);
+      placeOrder({type,market:m,amount,rate:finalRate,rateMode,fillMode});
+    };
+  }
+  build();
+}
+
+/* ===== 5. MATCHING ENGINE ===== */
+function placeOrder(o){
+  const ltv = o.type==='borrow'? Math.round((borrowedTotal()+o.amount)/Math.max(collateralValue(),1)*100):0;
+  const health=healthOf(ltv);
+  const pos={id:pid++, ...o, status:'matching', fills:[], ltv, hf:MAX_LTV/Math.max(ltv,1), health, ts:Date.now()};
+  if(o.type==='lend') state.reservedUsdc=Math.max(state.reservedUsdc-o.amount,0); // commit reserved liquidity
+  state.positions.push(pos);
+  closeModal(); state.view="portfolio"; render();
+  toast(`${o.type==='lend'?'Lend':'Borrow'} order placed — matching engine running`);
+  // matching engine simulation
+  setTimeout(()=>{
+    const pool = o.type==='borrow'?counterpartiesLend:counterpartiesBorrow;
+    if(o.fillMode==='single'){
+      pos.fills=[{name:pool[0], amount:o.amount}];
+    } else {
+      const parts=[0.45,0.33,0.22]; let rem=o.amount;
+      pos.fills=parts.map((p,i)=>{const amt=i===parts.length-1?rem:Math.round(o.amount*p/1000)*1000; rem-=amt; return {name:pool[i], amount:amt};});
+    }
+    pos.status='active';
+    if(state.view==="portfolio") render();
+    toast(`Order matched — ${pos.fills.length} counterpart${pos.fills.length===1?'y':'ies'} · AMINA co-signed`);
+  }, 2400);
+}
+
+/* ===== 6. POSITION DETAIL ===== */
+function openPosition(id){
+  const p=state.positions.find(x=>x.id===id); if(!p)return;
+  const filled=p.fills.reduce((s,f)=>s+f.amount,0);
+  const matching=p.status==='matching';
+  overlay.classList.add("show");
+  overlay.innerHTML=`<div class="modal wide">
+    <div class="modal-head"><div><h2>${p.type==='lend'?'Lending':'Borrowing'} USDC</h2><p>${names[p.market]}-backed · ${p.rateMode==='custom'?'custom limit':'market'} order</p></div><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="pd-grid">
+        <div class="pd-cell"><div class="k">${p.type==='lend'?'Supplied':'Principal'}</div><div class="v mono">${fr(p.amount)}</div></div>
+        <div class="pd-cell"><div class="k">Rate</div><div class="v mono">${p.rate}% ${p.type==='lend'?'APY':'APR'}</div></div>
+        ${p.type==='borrow'?`
+          <div class="pd-cell"><div class="k">Collateral</div><div class="v mono">${fr(collateralValue())}</div></div>
+          <div class="pd-cell"><div class="k">Health factor</div><div class="v mono" style="color:${p.health==='Healthy'?'var(--green)':p.health==='Watch'?'var(--amber)':'var(--red)'}">${p.hf.toFixed(2)}</div></div>
+        `:`
+          <div class="pd-cell"><div class="k">Accrued interest</div><div class="v mono">${matching?'—':fr(p.amount*p.rate/100*0.08)}</div></div>
+          <div class="pd-cell"><div class="k">Status</div><div class="v" style="font-size:14px;margin-top:6px">${matching?'Matching':'Active'}</div></div>
+        `}
+      </div>
+      <div class="olabel">${matching?'Matching':'Fills'} <span class="hint">${p.fillMode==='single'?'single batch':'partial fills'}</span></div>
+      ${matching?`<div class="info-card">${ic.spark}<div>The matching engine is pairing your order under AMINA's licence. ${p.fillMode==='single'?'Waiting for one counterparty to take the full amount.':'Accepting partial fills from multiple counterparties.'}</div></div>`
+        :`<div class="fills">${p.fills.map(f=>`<div class="fill-row"><div class="who"><span class="av">${f.name.split(' ').map(w=>w[0]).join('').slice(0,2)}</span>${f.name}</div><span class="mono">${fr(f.amount)} · ${Math.round(f.amount/p.amount*100)}%</span></div>`).join("")}</div>`}
+      ${p.type==='borrow'?`
+        <div class="health" style="margin:4px 0 18px"><div class="health-top"><span>LTV ${p.ltv}%</span><span>Margin ${MAX_LTV}% · Liq ${LIQ}%</span></div>
+          <div class="track"><div class="fill ${fillClass(p.health)}" style="width:${Math.min(p.ltv,100)}%"></div><div class="marker" style="left:${MAX_LTV}%"></div><div class="marker liq" style="left:${LIQ}%"></div></div></div>`:''}
+      <div style="display:flex;gap:10px">
+        ${p.type==='borrow'
+          ?`<button class="btn btn-out" style="flex:1" onclick="closeModal()">Add collateral</button><button class="btn btn-primary" style="flex:1" data-close-action="repay:${p.id}">Repay loan</button>`
+          :`<button class="btn btn-out" style="flex:1" onclick="closeModal()">Increase</button><button class="btn btn-primary" style="flex:1" data-close-action="withdraw:${p.id}">Withdraw</button>`}
+      </div>
+    </div></div>`;
+  document.querySelectorAll("[data-close-action]").forEach(b=>b.onclick=()=>{
+    const[act,pidv]=b.dataset.closeAction.split(":"); const idn=+pidv;
+    const idx=state.positions.findIndex(x=>x.id===idn); const pp=state.positions[idx];
+    if(act==='withdraw') state.reservedUsdc+=pp.amount; // liquidity back to reserved
+    const today=new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+    state.history.unshift({type:pp.type, market:pp.market, amount:pp.amount, rate:pp.rate, fillMode:pp.fillMode, status:act==='repay'?'Repaid':'Closed', date:today});
+    state.positions.splice(idx,1); closeModal(); render();
+    toast(act==='repay'?`Repaid ${fr(pp.amount)} — collateral token burned, ${pp.market} released`:`Withdrew ${fr(pp.amount)} USDC`);
+  });
+}
+
+/* ===== TOAST ===== */
+let tT;
+function toast(m){const t=document.getElementById("toast");document.getElementById("toastMsg").textContent=m;t.classList.add("show");clearTimeout(tT);tT=setTimeout(()=>t.classList.remove("show"),3200);}
+
+render();
+</script>
+
+
+<div id="tenderly-toolbar-content-view-root"><template shadowrootmode="open"><div id="shadow-root"><div class="TenderlyToolbarContent false"></div></div></template></div></body></html>
