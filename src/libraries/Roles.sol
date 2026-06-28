@@ -1,18 +1,25 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-/// @title Roles — canonical role IDs registered with `RoleManager`.
-/// @notice Eight roles per architecture v3 §7. Numerical IDs are
-///         chosen as deterministic constants so deployments are
-///         reproducible.
+/// @title Roles
+/// @notice Canonical role identifiers for Triora Core (S0.6 of the Tech Spec).
+/// @dev Used with {RoleManager} (an AccessControl instance). External/governance
+///      roles are held by AMINA/P2P multisigs; internal roles wire contracts together.
 library Roles {
-    // OZ AccessManager reserves 0 for ADMIN. Application roles start at 1.
-    uint64 internal constant GOVERNOR = 1; // P2P + AMINA 3-of-4
-    uint64 internal constant EMERGENCY = 2; // P2P + AMINA 2-of-2
-    uint64 internal constant CURATOR = 3; // AMINA risk
-    uint64 internal constant ALLOCATOR = 4; // matching engine
-    uint64 internal constant LIQUIDATOR = 5; // AMINA liquidator
-    uint64 internal constant GUARDIAN = 6; // pause / reduce risk only
-    uint64 internal constant OPS = 7; // hot keys, decrease caps
-    uint64 internal constant ORACLE_ADMIN = 8; // rotate oracle versions
+    // ── Governance / external actors ──────────────────────────────────────────
+    bytes32 internal constant GOVERNOR = keccak256("triora.role.GOVERNOR"); // P2P: upgrades, wiring
+    bytes32 internal constant CURATOR = keccak256("triora.role.CURATOR"); // AMINA: risk params, admission
+    bytes32 internal constant ALLOCATOR = keccak256("triora.role.ALLOCATOR"); // AMINA: open positions
+    bytes32 internal constant LIQUIDATOR = keccak256("triora.role.LIQUIDATOR"); // AMINA: liquidation ops
+    bytes32 internal constant ISSUER_MINTER = keccak256("triora.role.ISSUER_MINTER"); // custodian/CRE mint key
+    bytes32 internal constant GUARDIAN = keccak256("triora.role.GUARDIAN"); // AMINA OPS: pause / reduce risk
+    bytes32 internal constant EMERGENCY = keccak256("triora.role.EMERGENCY"); // joint: global halt / override
+    bytes32 internal constant ORACLE_ADMIN = keccak256("triora.role.ORACLE_ADMIN"); // oracle/param versions
+    bytes32 internal constant SETTLEMENT = keccak256("triora.role.SETTLEMENT"); // custody listener acks
+
+    // ── Internal component-to-component roles ─────────────────────────────────
+    bytes32 internal constant ENGINE = keccak256("triora.role.ENGINE"); // CollateralBridge
+    bytes32 internal constant LIQUIDATION_MODULE = keccak256("triora.role.LIQUIDATION_MODULE");
+    bytes32 internal constant TOKEN = keccak256("triora.role.TOKEN"); // cBTC token
+    bytes32 internal constant RELEASE_AUTHORIZER = keccak256("triora.role.RELEASE_AUTHORIZER");
 }

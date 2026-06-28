@@ -1,58 +1,64 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-/// @title Errors — protocol-wide custom errors.
+/// @title Errors
+/// @notice Protocol-wide custom errors (categorized). Cheaper + more precise than strings.
 library Errors {
-    // L1
-    error NotKybApproved(address who);
-    error KybExpired(address who);
-    error IssuerNotActive(address issuer);
-    error TokenPaused(address token);
-    error TokenNotAdmitted(address token);
-    error TokenAdmissionFailed(address token, bytes32 reasonCode);
-    error DualUseDisabled(address token);
-    error WrongTokenKind();
-    error CapExceeded(bytes32 dimension);
-
-    // L2
-    error PairNotActive(bytes32 pairKey);
-    error InvalidParams(bytes32 reasonCode);
-    error OracleStale(address feed);
-    error ParamsSchemaUnsupported(uint16 schemaVersion);
-    error ParamsHashMismatch();
-
-    // L3
-    error DealAlreadyExists(bytes32 dealId);
-    error DealNotFound(bytes32 dealId);
-    error DealNotActive(bytes32 dealId);
-    error DealNotTerminal(bytes32 dealId);
-    error DealStateForbidden(bytes32 dealId, uint8 actualState);
-    error NonceUsed(address who, bytes32 nonce);
-    error InvalidSignature(address expected);
-    error TermsMismatch();
-    error MaturityExpired();
-    error MaturityNotReached();
-    error PrincipalTooHigh();
-    error CollateralTooLow();
-    error PauseClockArithmetic();
-    error EngineAlreadyBound();
-    error OnlyEngine();
-    error ZeroAmount();
-    error InsufficientLedger();
+    // generic
     error ZeroAddress();
-    error GloballyHalted();
-    error EmergencySealed();
-    error DealPausedFor(bytes32 dealId, bytes32 reason);
-    error DealNotPaused(bytes32 dealId);
+    error ZeroAmount();
+    error ZeroValue();
+    error NotAuthorized(bytes32 role, address caller);
+    error Paused();
+    error AlreadySet();
+    error BadConfig();
 
-    // L4
-    error StepOutOfOrder(uint8 currentStep, uint8 requestedStep);
-    error LiquidationNotAllowedYet();
-    error LiquidationBoundExceeded();
-    error AttestationStale();
-    error AttestationDealIdMismatch();
-    error AttestationSignerMismatch(address expected, address actual);
+    // identity / kyb
+    error NotApproved(address who);
 
-    // L5 / general
-    error InvalidCaller(address who);
+    // custody / attestation
+    error BadSignature();
+    error AttestationExpired();
+    error AttestationFromFuture();
+    error LockNotActive(bytes32 pledgeId);
+    error UnknownPledge(bytes32 pledgeId);
+
+    // reserves / secure-mint
+    error ReserveStale();
+    error ReserveExceeded(uint256 supplyAfter, uint256 limit);
+    error ReserveSourceMissing();
+    error ReserveDiscrepancy(uint256 a, uint256 b);
+
+    // token
+    error TransferRestricted(address from, address to);
+    error MintExceedsPledge(uint256 mintedAfter, uint256 pledged);
+
+    // pledge
+    error PledgeNotFree(bytes32 pledgeId);
+    error PledgeBound(bytes32 pledgeId);
+    error BadPledgeStatus(uint8 status);
+
+    // position / engine
+    error UnknownPosition(bytes32 positionId);
+    error BadPositionState(uint8 state);
+    error LtvExceeded(uint256 requested, uint256 maxBorrow);
+    error MarketInactive();
+    error MaturityInPast();
+    error RateTooHigh(uint32 rateBps);
+    error CapExceeded();
+    error NotMatured();
+    error StillHealthy();
+
+    // oracle
+    error PriceStale();
+    error BadPrice();
+
+    // liquidation / release
+    error CureWindowActive(uint64 deadline);
+    error CureWindowNotElapsed(uint64 deadline);
+    error NoPendingLiquidation();
+    error ReportReused(bytes32 reportRef);
+    error VoucherConsumed(bytes32 voucherId);
+    error VoucherInvalid(bytes32 voucherId);
+    error BadDestination();
 }
