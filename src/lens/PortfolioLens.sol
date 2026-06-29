@@ -8,7 +8,7 @@ import {IPledgeRegistry} from "../interfaces/ITriora.sol";
 /// @title PortfolioLens
 /// @notice Read-only aggregation for the UI / indexer (Tech Spec S9). No privileges, no state.
 contract PortfolioLens {
-    LendingEngine public immutable bridge;
+    LendingEngine public immutable engine;
     IPledgeRegistry public immutable pledges;
 
     struct PositionView {
@@ -18,15 +18,15 @@ contract PortfolioLens {
         Types.Pledge pledge;
     }
 
-    constructor(address bridge_, address pledges_) {
-        bridge = LendingEngine(bridge_);
+    constructor(address engine_, address pledges_) {
+        engine = LendingEngine(engine_);
         pledges = IPledgeRegistry(pledges_);
     }
 
     function getPosition(bytes32 positionId) external view returns (PositionView memory v) {
-        v.position = bridge.getPosition(positionId);
-        v.currentOutstanding = bridge.currentOutstanding(positionId);
-        v.healthLtvBps = bridge.healthLtvBps(positionId);
+        v.position = engine.getPosition(positionId);
+        v.currentOutstanding = engine.currentOutstanding(positionId);
+        v.healthLtvBps = engine.healthLtvBps(positionId);
         v.pledge = pledges.getPledge(v.position.pledgeId);
     }
 

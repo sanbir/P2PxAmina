@@ -14,15 +14,15 @@ import {
 
 /// @title PermissionedCollateralToken (cBTC)
 /// @notice 1:1 restricted accounting claim on custodied BTC (Tech Spec S4). 8 decimals.
-///         Mints are pledge-bound AND reserve-guarded; burns are voucher-gated; transfers are
-///         restricted to protocol paths and check BOTH `from` and `to` (the recurring allowlist bug).
+///         Mints are pledge-bound AND reserve-guarded; burns are voucher-gated. Restricted transfers
+///         (Model A): allowed only if at least one side is a protocol address (engine); user↔user blocked.
 contract PermissionedCollateralToken is ERC20, TrioraAccess, IPermissionedCollateralToken {
     IReserveGuard public reserveGuard;
     IPledgeRegistry public pledgeRegistry;
     IReleaseAuthorizer public releaseAuthorizer;
     bool private _bound;
 
-    mapping(address => bool) public isProtocol; // bridge, protocol adapter, etc.
+    mapping(address => bool) public isProtocol; // engine + protocol contracts cBTC may move among
     mapping(address => bool) public frozen;
 
     event Bound(address reserveGuard, address pledgeRegistry, address releaseAuthorizer);

@@ -21,7 +21,7 @@ contract LiquidationModule is TrioraAccess, EIP712 {
     );
     uint64 public constant MAX_REPORT_SKEW = 5 minutes;
 
-    LendingEngine public immutable bridge;
+    LendingEngine public immutable engine;
     RiskConfig public immutable riskConfig;
     bytes32 public immutable marketId;
     address public oracleSigner;
@@ -43,14 +43,14 @@ contract LiquidationModule is TrioraAccess, EIP712 {
     event LiquidationRequested(bytes32 indexed positionId, bytes32 reportRef, uint64 cureDeadline);
     event LiquidationFinalized(bytes32 indexed positionId, bytes32 reportRef);
 
-    constructor(address roleManager_, address bridge_, address riskConfig_, bytes32 marketId_, address oracleSigner_)
+    constructor(address roleManager_, address engine_, address riskConfig_, bytes32 marketId_, address oracleSigner_)
         TrioraAccess(roleManager_)
         EIP712("TrioraLiquidationModule", "1")
     {
-        if (bridge_ == address(0) || riskConfig_ == address(0) || oracleSigner_ == address(0)) {
+        if (engine_ == address(0) || riskConfig_ == address(0) || oracleSigner_ == address(0)) {
             revert Errors.ZeroAddress();
         }
-        bridge = LendingEngine(bridge_);
+        engine = LendingEngine(engine_);
         riskConfig = RiskConfig(riskConfig_);
         marketId = marketId_;
         oracleSigner = oracleSigner_;
@@ -65,8 +65,8 @@ contract LiquidationModule is TrioraAccess, EIP712 {
     /// @notice Soft warning from the live oracle (starts the cure clock). LIQUIDATOR-only.
     function warn(bytes32 positionId) external restricted(Roles.LIQUIDATOR) {
         Types.MarketParams memory mp = riskConfig.getParams(marketId);
-        if (bridge.healthLtvBps(positionId) < mp.aminaWarningBps) revert Errors.StillHealthy();
-        bridge.setWarned(positionId, uint64(block.timestamp) + mp.cureWindowSecs);
+        if (engine.healthLtvBps(positionId) < mp.aminaWarningBps) revert Errors.StillHealthy();
+        engine.setWarned(positionId, uint64(block.timestamp) + mp.cureWindowSecs);
     }
 
     /// @notice Request liquidation with an objective signed oracle report (LTV breach OR maturity).
@@ -76,7 +76,7 @@ contract LiquidationModule is TrioraAccess, EIP712 {
     {
         _verifyReport(r, oracleSig);
         Types.MarketParams memory mp = riskConfig.getParams(marketId);
-        Types.Position memory p = bridge.getPosition(r.positionId);
+        Types.Position memory p = engine.getPosition(r.positionId);
 
         bool matured = block.timestamp >= p.maturityTs;
         bool breach = r.thresholdBps == mp.aminaLiquidationBps && r.collateralValue > 0
@@ -86,7 +86,7 @@ contract LiquidationModule is TrioraAccess, EIP712 {
         usedReport[r.reportRef] = true;
         firstReportRef[r.positionId] = r.reportRef;
         uint64 cureDeadline = uint64(block.timestamp) + mp.cureWindowSecs;
-        bridge.setLiquidationPending(r.positionId, cureDeadline);
+        engine.setLiquidationPending(r.positionId, cureDeadline);
         emit LiquidationRequested(r.positionId, r.reportRef, cureDeadline);
     }
 
@@ -97,19 +97,19 @@ contract LiquidationModule is TrioraAccess, EIP712 {
     {
         _verifyReport(r, oracleSig);
         if (r.reportRef == firstReportRef[r.positionId]) revert Errors.ReportReused(r.reportRef);
-        Types.Position memory p = bridge.getPosition(r.positionId);
+        Types.Position memory p = engine.getPosition(r.positionId);
         if (block.timestamp < p.cureDeadline) revert Errors.CureWindowNotElapsed(p.cureDeadline);
 
         usedReport[r.reportRef] = true;
-        bridge.executeLiquidation(r.positionId);
+        engine.executeLiquidation(r.positionId);
         emit LiquidationFinalized(r.positionId, r.reportRef);
     }
 
     /// @notice Escape hatch: anyone can cancel a pending (not-yet-executed) liquidation after the window.
     function cancelPendingLiquidation(bytes32 positionId) external {
-        Types.Position memory p = bridge.getPosition(positionId);
+        Types.Position memory p = engine.getPosition(positionId);
         if (block.timestamp <= p.cureDeadline) revert Errors.CureWindowActive(p.cureDeadline);
-        bridge.cancelLiquidation(positionId);
+        engine.cancelLiquidation(positionId);
     }
 
     function _verifyReport(LiquidationReport calldata r, bytes calldata sig) internal view {
