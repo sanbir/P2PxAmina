@@ -5,27 +5,23 @@ import {TrioraFixture} from "../TrioraFixture.sol";
 import {SignedCustodyAdapter} from "../../src/custody/SignedCustodyAdapter.sol";
 import {Errors} from "../../src/libraries/Errors.sol";
 
-/// @notice Dual-signed custody attestation tests (Tech Spec S3).
+/// @notice Dual-signed (custodian + AMINA) custody attestations (Tech Spec S3) — unchanged by Model A.
 contract CustodyTest is TrioraFixture {
     bytes32 internal pid = keccak256("p");
 
-    function _proof(uint64 observedAt, uint64 expiresAt)
-        internal
-        view
-        returns (SignedCustodyAdapter.PledgeProof memory)
-    {
+    function _proof(uint64 obs, uint64 exp) internal view returns (SignedCustodyAdapter.PledgeProof memory) {
         return SignedCustodyAdapter.PledgeProof({
-            custodyAccountRef: bytes32("acct-1"),
+            custodyAccountRef: bytes32("acct"),
             token: address(cbtc),
             amount: 10e8,
             decimals: 8,
-            observedAt: observedAt,
-            expiresAt: expiresAt,
+            observedAt: obs,
+            expiresAt: exp,
             controlAgreementHash: bytes32("ctrl")
         });
     }
 
-    function _hash(SignedCustodyAdapter.PledgeProof memory p) internal view returns (bytes32) {
+    function _digest(SignedCustodyAdapter.PledgeProof memory p) internal view returns (bytes32) {
         bytes32 sh = keccak256(
             abi.encode(
                 keccak256(
@@ -44,57 +40,55 @@ contract CustodyTest is TrioraFixture {
         return keccak256(abi.encodePacked("\x19\x01", _domainSep("TrioraCustodyAdapter", "1", address(custody)), sh));
     }
 
-    function _sig(uint256 pk, bytes32 digest) internal pure returns (bytes memory) {
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
+    function _s(uint256 pk, bytes32 d) internal pure returns (bytes memory) {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, d);
         return abi.encodePacked(r, s, v);
     }
 
     function test_validDualSig_accepted() public {
         SignedCustodyAdapter.PledgeProof memory p = _proof(uint64(block.timestamp), uint64(block.timestamp + 1 days));
-        bytes32 d = _hash(p);
-        custody.submitPledgeProof(pid, p, _sig(custodianPk, d), _sig(aminaSignerPk, d));
+        bytes32 d = _digest(p);
+        custody.submitPledgeProof(pid, p, _s(custodianPk, d), _s(aminaSignerPk, d));
         assertTrue(custody.isLockActive(pid));
         assertTrue(custody.verifyPledge(pid, address(cbtc), 10e8));
-        assertFalse(custody.verifyPledge(pid, address(cbtc), 11e8)); // amount > attested
+        assertFalse(custody.verifyPledge(pid, address(cbtc), 11e8));
     }
 
     function test_missingAminaSig_reverts() public {
         SignedCustodyAdapter.PledgeProof memory p = _proof(uint64(block.timestamp), uint64(block.timestamp + 1 days));
-        bytes32 d = _hash(p);
-        // both slots signed by custodian → amina slot recovers to wrong signer
+        bytes32 d = _digest(p);
         vm.expectRevert(Errors.BadSignature.selector);
-        custody.submitPledgeProof(pid, p, _sig(custodianPk, d), _sig(custodianPk, d));
+        custody.submitPledgeProof(pid, p, _s(custodianPk, d), _s(custodianPk, d));
     }
 
     function test_wrongSigner_reverts() public {
         SignedCustodyAdapter.PledgeProof memory p = _proof(uint64(block.timestamp), uint64(block.timestamp + 1 days));
-        bytes32 d = _hash(p);
-        uint256 evilPk = 0xDEAD;
+        bytes32 d = _digest(p);
         vm.expectRevert(Errors.BadSignature.selector);
-        custody.submitPledgeProof(pid, p, _sig(evilPk, d), _sig(aminaSignerPk, d));
+        custody.submitPledgeProof(pid, p, _s(0xDEAD, d), _s(aminaSignerPk, d));
     }
 
-    function test_expiredAttestation_reverts() public {
+    function test_expired_reverts() public {
         SignedCustodyAdapter.PledgeProof memory p = _proof(uint64(block.timestamp - 2), uint64(block.timestamp));
-        bytes32 d = _hash(p);
+        bytes32 d = _digest(p);
         vm.expectRevert(Errors.AttestationExpired.selector);
-        custody.submitPledgeProof(pid, p, _sig(custodianPk, d), _sig(aminaSignerPk, d));
+        custody.submitPledgeProof(pid, p, _s(custodianPk, d), _s(aminaSignerPk, d));
     }
 
-    function test_futureAttestation_reverts() public {
+    function test_future_reverts() public {
         SignedCustodyAdapter.PledgeProof memory p =
             _proof(uint64(block.timestamp + 10 minutes), uint64(block.timestamp + 1 days));
-        bytes32 d = _hash(p);
+        bytes32 d = _digest(p);
         vm.expectRevert(Errors.AttestationFromFuture.selector);
-        custody.submitPledgeProof(pid, p, _sig(custodianPk, d), _sig(aminaSignerPk, d));
+        custody.submitPledgeProof(pid, p, _s(custodianPk, d), _s(aminaSignerPk, d));
     }
 
-    function test_lockExpires_overTime() public {
+    function test_lockExpiresOverTime() public {
         SignedCustodyAdapter.PledgeProof memory p = _proof(uint64(block.timestamp), uint64(block.timestamp + 1 days));
-        bytes32 d = _hash(p);
-        custody.submitPledgeProof(pid, p, _sig(custodianPk, d), _sig(aminaSignerPk, d));
+        bytes32 d = _digest(p);
+        custody.submitPledgeProof(pid, p, _s(custodianPk, d), _s(aminaSignerPk, d));
         assertTrue(custody.isLockActive(pid));
         vm.warp(block.timestamp + 1 days + 1);
-        assertFalse(custody.isLockActive(pid)); // attestation no longer fresh
+        assertFalse(custody.isLockActive(pid));
     }
 }

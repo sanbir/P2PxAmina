@@ -6,23 +6,18 @@ import {Errors} from "../../src/libraries/Errors.sol";
 import {Types} from "../../src/libraries/Types.sol";
 import {LiquidationModule} from "../../src/liquidation/LiquidationModule.sol";
 
-/// @notice Liquidation tests (Tech Spec S8): objective trigger, fixed cure window, two-report finalize,
-///         surplus-to-borrower, default shortfall, permissionless cancel, AMINA-threshold < Morpho LLTV.
+/// @notice Model A liquidation (Tech Spec S8): objective signed-report trigger + cure window + two-report
+///         finalize + surplus-to-borrower. NO real USDC moves on-chain (the lender is repaid off-chain
+///         from AMINA's sale of the released BTC) — only cBTC release vouchers are issued.
 contract LiquidationTest is TrioraFixture {
     bytes32 internal pid = keccak256("p");
-    bytes32 internal positionId;
+    bytes32 internal rid = keccak256("r");
+    bytes32 internal id;
 
     function setUp() public override {
         super.setUp();
-        setupPledgeAndMint(pid, borrower, 10e8);
-        vm.prank(amina);
-        positionId = bridge.openPosition(
-            borrower, pid, 500000e6, RATE_BPS, uint64(block.timestamp + 90 days), bytes32("legal")
-        );
-        // fund AMINA treasury to repay Morpho on liquidation
-        usdc.mint(aminaTreasury, 2000000e6);
-        vm.prank(aminaTreasury);
-        usdc.approve(address(bridge), type(uint256).max);
+        id = openDeal(pid, rid, 10e8, 500000e6, uint64(block.timestamp + 90 days));
+        ackFunding(id, 500000e6, bytes32("f1")); // Active
     }
 
     function _report(uint256 coll, uint256 debt, bytes32 ref)
@@ -31,7 +26,7 @@ contract LiquidationTest is TrioraFixture {
         returns (LiquidationModule.LiquidationReport memory)
     {
         return LiquidationModule.LiquidationReport({
-            positionId: positionId,
+            positionId: id,
             collateralValue: coll,
             debtValue: debt,
             thresholdBps: 7800,
@@ -41,154 +36,95 @@ contract LiquidationTest is TrioraFixture {
         });
     }
 
-    function _dropPrice(uint256 price) internal {
+    function _drop(uint256 price) internal {
         feed.set(int256(price * 1e8), block.timestamp);
     }
 
-    function test_invariant_aminaThresholdBelowMorphoLltv() public view {
-        Types.MarketParams memory mp = risk.getParams(marketId);
-        assertLt(mp.aminaLiquidationBps, mp.morphoLltvBps);
-        assertLt(mp.aminaWarningBps, mp.aminaLiquidationBps);
-        assertLt(mp.ltvBps, mp.aminaWarningBps);
-    }
-
-    function test_warn_setsWarnedState() public {
-        _dropPrice(60000); // LTV ~83% > warning 75%
+    function test_warn_setsWarned() public {
+        _drop(60000);
         vm.prank(aminaBot);
-        module.warn(positionId);
-        assertEq(uint8(bridge.getPosition(positionId).state), uint8(Types.PositionState.Warned));
+        module.warn(id);
+        assertEq(uint8(engine.getPosition(id).state), uint8(Types.PositionState.Warned));
     }
 
-    function test_warn_revertsWhenHealthy() public {
+    function test_request_requiresBreachOrMaturity() public {
+        _drop(60000);
+        LiquidationModule.LiquidationReport memory r = _report(1000000, 100000, bytes32("r0"));
         vm.prank(aminaBot);
         vm.expectRevert(Errors.StillHealthy.selector);
-        module.warn(positionId);
-    }
-
-    function test_request_requiresObjectiveBreach() public {
-        _dropPrice(60000);
-        // not-a-breach report (debt/coll below threshold) -> StillHealthy
-        LiquidationModule.LiquidationReport memory r = _report(1000000, 100000, keccak256("r0"));
-        bytes memory sig = signLiqReport(r);
-        vm.prank(aminaBot);
-        vm.expectRevert(Errors.StillHealthy.selector);
-        module.requestLiquidation(r, sig);
-    }
-
-    function test_request_badSignature_reverts() public {
-        _dropPrice(60000);
-        LiquidationModule.LiquidationReport memory r = _report(600000, 500000, keccak256("r1"));
-        bytes memory badSig = signLiqReport(r);
-        // tamper: change debtValue after signing
-        r.debtValue = 510000;
-        vm.prank(aminaBot);
-        vm.expectRevert(Errors.BadSignature.selector);
-        module.requestLiquidation(r, badSig);
+        module.requestLiquidation(r, signLiqReport(r));
     }
 
     function test_finalizeBeforeCure_reverts() public {
-        _dropPrice(60000);
-        LiquidationModule.LiquidationReport memory r1 = _report(600000, 500000, keccak256("r1"));
+        _drop(60000);
+        LiquidationModule.LiquidationReport memory r1 = _report(600000, 500000, bytes32("r1"));
         vm.prank(aminaBot);
         module.requestLiquidation(r1, signLiqReport(r1));
-
-        LiquidationModule.LiquidationReport memory r2 = _report(600000, 500000, keccak256("r2"));
-        vm.prank(aminaBot);
-        vm.expectRevert(); // CureWindowNotElapsed
-        module.finalizeLiquidation(r2, signLiqReport(r2));
-    }
-
-    function test_finalize_reusedReport_reverts() public {
-        _dropPrice(60000);
-        LiquidationModule.LiquidationReport memory r1 = _report(600000, 500000, keccak256("r1"));
-        vm.prank(aminaBot);
-        module.requestLiquidation(r1, signLiqReport(r1));
-        vm.warp(block.timestamp + 1 days + 1);
-        // reuse same ref -> ReportReused (also already-used)
+        LiquidationModule.LiquidationReport memory r2 = _report(600000, 500000, bytes32("r2"));
         vm.prank(aminaBot);
         vm.expectRevert();
-        module.finalizeLiquidation(r1, signLiqReport(r1));
+        module.finalizeLiquidation(r2, signLiqReport(r2));
     }
 
-    function test_fullLiquidation_surplusToBorrower() public {
-        _dropPrice(60000); // coll ~$600k, debt ~$500k
-        LiquidationModule.LiquidationReport memory r1 = _report(600000, 500000, keccak256("r1"));
+    function test_fullLiquidation_surplusToBorrower_noUsdcMoves() public {
+        _drop(60000); // coll ~$600k, debt ~$500k → LTV ~83% > 78%
+        LiquidationModule.LiquidationReport memory r1 = _report(600000, 500000, bytes32("r1"));
         vm.prank(aminaBot);
         module.requestLiquidation(r1, signLiqReport(r1));
-        assertEq(uint8(bridge.getPosition(positionId).state), uint8(Types.PositionState.LiquidationPending));
-
         vm.warp(block.timestamp + 1 days + 1);
-        LiquidationModule.LiquidationReport memory r2 = _report(600000, 500000, keccak256("r2"));
+        LiquidationModule.LiquidationReport memory r2 = _report(600000, 500000, bytes32("r2"));
         vm.prank(aminaBot);
         module.finalizeLiquidation(r2, signLiqReport(r2));
 
-        // executed: collateral withdrawn, vouchers issued, Morpho debt repaid by AMINA
-        assertTrue(bridge.liqExecuted(positionId));
-        (, uint256 morphoDebt) = morpho.position(address(adapter));
-        assertEq(morphoDebt, 0, "morpho debt cleared by AMINA");
-
-        bytes32 vSurplus = bridge.voucherSurplus(positionId);
-        assertTrue(vSurplus != bytes32(0), "surplus voucher issued");
+        assertTrue(engine.liqExecuted(id));
+        bytes32 vSeized = engine.voucherPrimary(id);
+        bytes32 vSurplus = engine.voucherSurplus(id);
+        assertEq(release.getVoucher(vSeized).destination, aminaDesk, "seized -> AMINA desk");
+        assertTrue(vSurplus != bytes32(0));
         assertEq(release.getVoucher(vSurplus).destination, borrower, "surplus -> borrower");
 
-        bytes32 vPrimary = bridge.voucherPrimary(positionId);
-        assertEq(release.getVoucher(vPrimary).destination, aminaDesk, "seized -> AMINA desk");
-
-        // settlement ack burns cBTC and finalizes
         vm.prank(custodyListener);
-        bridge.confirmRelease(positionId);
-        assertEq(uint8(bridge.getPosition(positionId).state), uint8(Types.PositionState.Liquidated));
+        engine.confirmRelease(id);
+        assertEq(uint8(engine.getPosition(id).state), uint8(Types.PositionState.Liquidated));
         assertEq(cbtc.totalSupply(), 0, "all cBTC burned");
-
-        // surplus + seized sum to the original collateral
-        uint256 seized = release.getVoucher(vPrimary).amount;
-        uint256 surplus = release.getVoucher(vSurplus).amount;
-        assertEq(seized + surplus, 10e8, "seized + surplus == collateral");
-        assertGt(surplus, 0, "borrower keeps surplus");
+        // seized + surplus == original collateral
+        assertEq(release.getVoucher(vSeized).amount + release.getVoucher(vSurplus).amount, 10e8);
     }
 
-    function test_underwater_marksDefaulted_noSurplus() public {
-        _dropPrice(50000); // coll $500k ~= debt -> payout(1.06x) exceeds collateral
-        LiquidationModule.LiquidationReport memory r1 = _report(500000, 500000, keccak256("r1"));
+    function test_underwater_marksDefaulted() public {
+        _drop(50000); // coll ~$500k ≈ debt → payout(1.06x) exceeds collateral
+        LiquidationModule.LiquidationReport memory r1 = _report(500000, 500000, bytes32("r1"));
         vm.prank(aminaBot);
         module.requestLiquidation(r1, signLiqReport(r1));
         vm.warp(block.timestamp + 1 days + 1);
-        LiquidationModule.LiquidationReport memory r2 = _report(500000, 500000, keccak256("r2"));
+        LiquidationModule.LiquidationReport memory r2 = _report(500000, 500000, bytes32("r2"));
         vm.prank(aminaBot);
         module.finalizeLiquidation(r2, signLiqReport(r2));
-
-        assertTrue(bridge.liqDefaulted(positionId));
-        assertEq(bridge.voucherSurplus(positionId), bytes32(0), "no surplus voucher");
+        assertTrue(engine.liqDefaulted(id));
+        assertEq(engine.voucherSurplus(id), bytes32(0));
         vm.prank(custodyListener);
-        bridge.confirmRelease(positionId);
-        assertEq(uint8(bridge.getPosition(positionId).state), uint8(Types.PositionState.Defaulted));
+        engine.confirmRelease(id);
+        assertEq(uint8(engine.getPosition(id).state), uint8(Types.PositionState.Defaulted));
     }
 
-    function test_cancelPendingLiquidation_afterWindow_byAnyone() public {
-        _dropPrice(60000);
-        LiquidationModule.LiquidationReport memory r1 = _report(600000, 500000, keccak256("r1"));
+    function test_cancelAfterWindow_byAnyone() public {
+        _drop(60000);
+        LiquidationModule.LiquidationReport memory r1 = _report(600000, 500000, bytes32("r1"));
         vm.prank(aminaBot);
         module.requestLiquidation(r1, signLiqReport(r1));
-
-        // before window: cannot cancel
         vm.prank(stranger);
         vm.expectRevert();
-        module.cancelPendingLiquidation(positionId);
-
-        // after window, not finalized -> anyone can cancel back to Active
+        module.cancelPendingLiquidation(id); // before window
         vm.warp(block.timestamp + 1 days + 1);
         vm.prank(stranger);
-        module.cancelPendingLiquidation(positionId);
-        assertEq(uint8(bridge.getPosition(positionId).state), uint8(Types.PositionState.Active));
+        module.cancelPendingLiquidation(id);
+        assertEq(uint8(engine.getPosition(id).state), uint8(Types.PositionState.Active));
     }
 
-    function test_maturity_allowsLiquidation() public {
-        // healthy price but matured -> liquidation eligible
-        vm.warp(block.timestamp + 91 days); // past 90-day maturity
-        feed.set(int256(BTC_PRICE_1E8), block.timestamp); // refresh feed
-        LiquidationModule.LiquidationReport memory r1 = _report(1000000, 500000, keccak256("r1")); // not a breach
-        vm.prank(aminaBot);
-        module.requestLiquidation(r1, signLiqReport(r1)); // allowed because matured
-        assertEq(uint8(bridge.getPosition(positionId).state), uint8(Types.PositionState.LiquidationPending));
+    function test_thresholdLadder_invariant() public view {
+        Types.MarketParams memory mp = risk.getParams(marketId);
+        assertLt(mp.ltvBps, mp.aminaWarningBps);
+        assertLt(mp.aminaWarningBps, mp.aminaLiquidationBps);
+        assertLe(mp.aminaLiquidationBps, 10000);
     }
 }

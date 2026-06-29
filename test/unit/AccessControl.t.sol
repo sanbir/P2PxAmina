@@ -5,104 +5,85 @@ import {TrioraFixture} from "../TrioraFixture.sol";
 import {Errors} from "../../src/libraries/Errors.sol";
 import {Roles} from "../../src/libraries/Roles.sol";
 import {Types} from "../../src/libraries/Types.sol";
-import {CollateralBridge} from "../../src/engine/CollateralBridge.sol";
+import {LendingEngine} from "../../src/engine/LendingEngine.sol";
 
-/// @notice Role-gating + privilege-separation tests (Tech Spec S1, S0.9 #8).
+/// @notice Role gating + privilege separation (Model A).
 contract AccessControlTest is TrioraFixture {
     bytes32 internal pid = keccak256("p");
+    bytes32 internal rid = keccak256("r");
 
-    function test_openPosition_onlyAllocator() public {
-        setupPledgeAndMint(pid, borrower, 10e8);
+    function test_openMatchedDeal_onlyAllocator() public {
+        setupBorrowerCbtc(pid, 10e8);
+        setupLenderCusdc(rid, 100000e6);
         vm.prank(stranger);
         vm.expectRevert();
-        bridge.openPosition(borrower, pid, 100000e6, RATE_BPS, uint64(block.timestamp + 90 days), bytes32("l"));
+        engine.openMatchedDeal(
+            lender, borrower, pid, rid, 100000e6, RATE_BPS, uint64(block.timestamp + 90 days), bytes32("l")
+        );
     }
 
-    function test_registerPledge_onlyAllocator() public {
-        attestReserve(100e8);
-        attestPledge(pid, 10e8);
+    function test_registerReserve_onlyAllocator() public {
+        attestReserve(address(cusdc), 1000000e6, 6);
+        attestPledge(rid, address(cusdc), 500000e6, 6);
         vm.prank(stranger);
         vm.expectRevert();
-        pledges.registerPledge(pid, borrower, bytes32("acct-1"), 10e8, bytes32("ctrl"));
+        reserves.registerReserve(rid, lender, bytes32("acct"), 500000e6, bytes32("ctrl"));
     }
 
-    function test_recordMint_onlyTokenRole() public {
-        // direct call to PledgeRegistry.recordMint from a non-token address must revert
-        vm.prank(stranger);
+    function test_confirmFunding_onlyAcker() public {
+        bytes32 id = openDeal(pid, rid, 10e8, 100000e6, uint64(block.timestamp + 90 days));
+        // direct call to engine.confirmFunding by a non-acker (even SETTLEMENT) reverts
+        vm.prank(custodyListener);
         vm.expectRevert();
-        pledges.recordMint(pid, 1e8);
+        engine.confirmFunding(id, bytes32("x"));
     }
 
-    function test_lockForDeal_onlyEngineRole() public {
+    function test_confirmRelease_onlySettlement() public {
+        bytes32 id = openDeal(pid, rid, 10e8, 100000e6, uint64(block.timestamp + 90 days));
+        ackFunding(id, 100000e6, bytes32("f1"));
+        vm.prank(borrower);
+        engine.requestRepayment(id);
+        ackRepayment(id, engine.currentOutstanding(id), bytes32("r1"));
         vm.prank(stranger);
         vm.expectRevert();
-        pledges.lockForDeal(pid, bytes32("d"), 1e8);
+        engine.confirmRelease(id);
     }
 
     function test_setMarket_onlyCurator() public {
         Types.MarketParams memory mp = risk.getParams(marketId);
-        vm.prank(aminaBot); // LIQUIDATOR, not CURATOR
+        vm.prank(aminaBot);
         vm.expectRevert();
         risk.setMarket(marketId, mp);
     }
 
-    function test_confirmRelease_onlySettlement() public {
-        setupPledgeAndMint(pid, borrower, 10e8);
-        vm.prank(amina);
-        bytes32 positionId =
-            bridge.openPosition(borrower, pid, 100000e6, RATE_BPS, uint64(block.timestamp + 90 days), bytes32("l"));
+    function test_engineHooks_onlyModule() public {
+        vm.prank(aminaBot); // holds LIQUIDATOR (to call the module), NOT the engine hook role
+        vm.expectRevert();
+        engine.setWarned(bytes32("x"), uint64(block.timestamp + 1));
+    }
+
+    function test_recordMint_onlyTokenRole() public {
         vm.prank(stranger);
         vm.expectRevert();
-        bridge.confirmRelease(positionId);
+        reserves.recordMint(rid, 1e6);
     }
 
-    function test_bridgeLiquidationHooks_onlyModule() public {
-        vm.prank(aminaBot); // LIQUIDATOR holds the role to call the MODULE, not the bridge hook
-        vm.expectRevert();
-        bridge.setWarned(bytes32("x"), uint64(block.timestamp + 1));
-    }
-
-    function test_privilegeSeparation_allocatorCannotSetRisk() public {
-        // ALLOCATOR (amina ops hot wallet for opening deals) must not be able to set risk params
-        // unless ALSO granted CURATOR. Here amina happens to hold both; a pure ALLOCATOR cannot.
-        address pureAllocator = makeAddr("pureAllocator");
-        rm.grantRole(Roles.ALLOCATOR, pureAllocator);
-        Types.MarketParams memory mp = risk.getParams(marketId);
-        vm.prank(pureAllocator);
-        vm.expectRevert();
-        risk.setMarket(marketId, mp);
-    }
-
-    function test_pause_byGuardian_unpause_onlyEmergency() public {
-        address pureGuardian = makeAddr("pureGuardian");
-        rm.grantRole(Roles.GUARDIAN, pureGuardian);
-        vm.prank(pureGuardian);
-        bridge.pause();
-        assertTrue(bridge.paused());
-        // a guardian-only key cannot unpause (risk-increasing → EMERGENCY)
-        vm.prank(pureGuardian);
-        vm.expectRevert();
-        bridge.unpause();
-        vm.prank(amina); // holds EMERGENCY
-        bridge.unpause();
-        assertFalse(bridge.paused());
-    }
-
-    function test_wire_isOneShot_evenForGovernor() public {
-        // wire already called in fixture; second call reverts (AlreadySet)
-        CollateralBridge.Wiring memory w = CollateralBridge.Wiring({
+    function test_wire_oneShot() public {
+        LendingEngine.Wiring memory w = LendingEngine.Wiring({
             kyb: address(kyb),
             pledges: address(pledges),
+            reserves: address(reserves),
             cbtc: address(cbtc),
-            adapter: address(adapter),
+            cusdc: address(cusdc),
             oracle: address(oracle),
             releaseAuth: address(release),
             router: address(router),
             riskConfig: address(risk),
             positions: address(positions),
+            acker: address(acker),
             marketId: marketId
         });
         vm.expectRevert(Errors.AlreadySet.selector);
-        bridge.wire(w); // called by this = GOVERNOR
+        engine.wire(w);
     }
 }

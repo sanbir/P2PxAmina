@@ -3,110 +3,98 @@ pragma solidity 0.8.28;
 
 import {TrioraFixture} from "../TrioraFixture.sol";
 import {Types} from "../../src/libraries/Types.sol";
-import {TrioraMath} from "../../src/libraries/TrioraMath.sol";
 
-/// @notice Full happy-path repo lifecycle + reconciliation (Tech Spec S12 acceptance gate #1).
+/// @notice Model A happy-path lifecycle + the HARD INVARIANT: no real funds ever touch a contract
+///         (the engine only ever holds cBTC/cUSDC accounting tokens; real USDC settles off-chain).
 contract LifecycleTest is TrioraFixture {
     bytes32 internal pledgeId = keccak256("pledge-1");
+    bytes32 internal reserveId = keccak256("reserve-1");
 
-    function _open() internal returns (bytes32 positionId) {
-        setupPledgeAndMint(pledgeId, borrower, 10e8); // 10 cBTC
-        // 10 BTC * $100k = $1,000,000 ; LTV 70% → max 700k ; borrow 500k
-        vm.prank(amina);
-        positionId = bridge.openPosition(
-            borrower, pledgeId, 500000e6, RATE_BPS, uint64(block.timestamp + 90 days), bytes32("legal")
-        );
-    }
-
-    function test_open_routesUsdcToBorrower_andRecordsPosition() public {
-        bytes32 positionId = _open();
-        assertEq(usdc.balanceOf(borrower), 500000e6, "borrower got USDC");
-        assertEq(cbtc.balanceOf(address(morpho)), 10e8, "cBTC collateral in morpho");
-        assertEq(cbtc.balanceOf(address(bridge)), 0, "bridge holds no cBTC after supply");
-
-        Types.Position memory p = bridge.getPosition(positionId);
-        assertEq(uint8(p.state), uint8(Types.PositionState.Active));
-        assertEq(p.principal, 500000e6);
-        assertEq(p.outstanding, 500000e6);
+    function test_openMatchedDeal_locksAccountingTokens_settlementPending() public {
+        bytes32 id = openDeal(pledgeId, reserveId, 10e8, 500000e6, uint64(block.timestamp + 90 days));
+        Types.Position memory p = engine.getPosition(id);
+        assertEq(uint8(p.state), uint8(Types.PositionState.SettlementPending));
+        assertEq(p.lender, lender);
+        assertEq(p.borrower, borrower);
         assertEq(p.collateral, 10e8);
-        assertEq(bridge.borrowerDebt(borrower), 500000e6);
+        assertEq(p.principal, 500000e6);
+        assertEq(p.startTs, 0, "interest not started before funding ack");
+        // accounting tokens are locked in the engine; counterparties hold none
+        assertEq(cbtc.balanceOf(address(engine)), 10e8);
+        assertEq(cusdc.balanceOf(address(engine)), 500000e6);
+        assertEq(cbtc.balanceOf(borrower), 0);
+        assertEq(cusdc.balanceOf(lender), 0);
     }
 
-    function test_interestAccrues_fromActiveOnly() public {
-        bytes32 positionId = _open();
-        vm.warp(block.timestamp + 90 days);
-        uint256 expectedInterest = TrioraMath.linearInterest(500000e6, RATE_BPS, 90 days);
-        assertEq(bridge.currentOutstanding(positionId), 500000e6 + expectedInterest);
-        assertApproxEqAbs(expectedInterest, uint256(500000e6) * 5 / 100 * 90 / 365, 2);
+    function test_fundingAck_activates_burnsCusdc_startsInterest() public {
+        bytes32 id = openDeal(pledgeId, reserveId, 10e8, 500000e6, uint64(block.timestamp + 90 days));
+        ackFunding(id, 500000e6, bytes32("SR-FUND-1"));
+        Types.Position memory p = engine.getPosition(id);
+        assertEq(uint8(p.state), uint8(Types.PositionState.Active));
+        assertGt(p.startTs, 0);
+        // cUSDC reservation is consumed (the real USDC moved lender->borrower in custody)
+        assertEq(cusdc.totalSupply(), 0, "cUSDC burned at funding");
+        assertEq(cusdc.balanceOf(address(engine)), 0);
+        // cBTC collateral stays locked in the engine
+        assertEq(cbtc.balanceOf(address(engine)), 10e8);
     }
 
-    function test_fullRepay_thenRelease_reconciles() public {
-        bytes32 positionId = _open();
+    function test_repay_release_closed_reconciles() public {
+        bytes32 id = openDeal(pledgeId, reserveId, 10e8, 500000e6, uint64(block.timestamp + 90 days));
+        ackFunding(id, 500000e6, bytes32("SR-FUND-1"));
         vm.warp(block.timestamp + 90 days);
 
-        uint256 owed = bridge.currentOutstanding(positionId);
-        // borrower has 500k from the loan; mint the interest shortfall
-        usdc.mint(borrower, owed - 500000e6);
+        vm.prank(borrower);
+        engine.requestRepayment(id);
+        assertEq(uint8(engine.getPosition(id).state), uint8(Types.PositionState.RepaymentPending));
 
-        vm.startPrank(borrower);
-        usdc.approve(address(bridge), owed);
-        bridge.repay(positionId, type(uint256).max);
-        vm.stopPrank();
-
-        Types.Position memory p = bridge.getPosition(positionId);
+        // borrower repaid the lender off-chain; AMINA co-signs the ack
+        ackRepayment(id, engine.currentOutstanding(id), bytes32("SR-REPAY-1"));
+        Types.Position memory p = engine.getPosition(id);
         assertEq(uint8(p.state), uint8(Types.PositionState.ReleasePending));
         assertEq(p.outstanding, 0);
-        assertEq(cbtc.balanceOf(address(bridge)), 10e8, "collateral withdrawn back to bridge");
-        assertEq(bridge.borrowerDebt(borrower), 0);
 
-        // custody listener confirms the off-chain BTC release → burn cBTC, close
+        // custody releases BTC to borrower off-chain; listener acks → burn cBTC
         vm.prank(custodyListener);
-        bridge.confirmRelease(positionId);
-
-        p = bridge.getPosition(positionId);
+        engine.confirmRelease(id);
+        p = engine.getPosition(id);
         assertEq(uint8(p.state), uint8(Types.PositionState.Closed));
         assertEq(cbtc.totalSupply(), 0, "all cBTC burned on release");
-        assertEq(cbtc.balanceOf(address(bridge)), 0);
-
-        Types.Pledge memory pl = pledges.getPledge(pledgeId);
-        assertEq(uint8(pl.status), uint8(Types.PledgeStatus.Released));
-
-        // morpho debt fully cleared
-        (uint256 coll, uint256 debt) = morpho.position(address(adapter));
-        assertEq(coll, 0);
-        assertEq(debt, 0);
+        assertEq(uint8(pledges.getPledge(pledgeId).status), uint8(Types.PledgeStatus.Released));
+        assertEq(engine.borrowerDebt(borrower), 0);
     }
 
-    function test_partialRepay_keepsActive() public {
-        bytes32 positionId = _open();
+    function test_interestAccruesOnlyAfterFunding() public {
+        bytes32 id = openDeal(pledgeId, reserveId, 10e8, 500000e6, uint64(block.timestamp + 90 days));
+        // before funding ack: warp, still no interest
         vm.warp(block.timestamp + 30 days);
-        vm.startPrank(borrower);
-        usdc.approve(address(bridge), 100000e6);
-        bridge.repay(positionId, 100000e6);
-        vm.stopPrank();
-
-        Types.Position memory p = bridge.getPosition(positionId);
-        assertEq(uint8(p.state), uint8(Types.PositionState.Active));
-        assertEq(p.outstanding, bridge.currentOutstanding(positionId));
-        assertLt(p.outstanding, 500000e6);
+        assertEq(engine.currentOutstanding(id), 500000e6, "no interest before funding");
+        ackFunding(id, 500000e6, bytes32("SR-FUND-1"));
+        vm.warp(block.timestamp + 90 days);
+        assertGt(engine.currentOutstanding(id), 500000e6, "interest accrues after funding");
     }
 
-    function test_topUpCollateral_increasesCollateral() public {
-        // mint 12 cBTC, open against 10... but openPosition uses full free. Instead: mint 10, open uses all.
-        // For top-up we need spare free cBTC, so mint a larger pledge and open with the same (full),
-        // then top up from a second pledge is out of scope; here we verify the guard path with extra room.
-        setupPledgeAndMint(pledgeId, borrower, 10e8);
-        // mint 2 more cBTC into the same pledge's room? pledged=10 already fully minted. Use a fresh test:
+    function test_cancelUnfunded_returnsTokens() public {
+        bytes32 id = openDeal(pledgeId, reserveId, 10e8, 500000e6, uint64(block.timestamp + 90 days));
         vm.prank(amina);
-        bytes32 positionId = bridge.openPosition(
-            borrower, pledgeId, 100000e6, RATE_BPS, uint64(block.timestamp + 90 days), bytes32("legal")
-        );
-        Types.Position memory p = bridge.getPosition(positionId);
-        assertEq(p.collateral, 10e8);
-        assertEq(uint8(p.state), uint8(Types.PositionState.Active));
-        // no spare free cBTC on this pledge → top up reverts (free == 0)
+        engine.cancelUnfunded(id);
+        assertEq(uint8(engine.getPosition(id).state), uint8(Types.PositionState.Cancelled));
+        assertEq(cbtc.balanceOf(borrower), 10e8, "cBTC returned to borrower");
+        assertEq(cusdc.balanceOf(lender), 500000e6, "cUSDC returned to lender");
+    }
+
+    /// @notice HARD INVARIANT (ADR-0001): the engine never holds anything but cBTC/cUSDC; there is no
+    ///         real-value ERC-20 in the system at all. Real settlement is only signed acks + events.
+    function test_invariant_engineHoldsOnlyAccountingTokens() public {
+        bytes32 id = openDeal(pledgeId, reserveId, 10e8, 500000e6, uint64(block.timestamp + 90 days));
+        ackFunding(id, 500000e6, bytes32("SR-FUND-1"));
+        // the engine's only token holdings are the restricted accounting tokens
+        assertEq(cbtc.balanceOf(address(engine)), 10e8);
+        assertEq(cusdc.balanceOf(address(engine)), 0); // burned at funding
+        assertEq(address(engine).balance, 0, "engine holds no ETH");
+        // both tokens are restricted (cannot leak to a non-protocol holder)
         vm.prank(borrower);
         vm.expectRevert();
-        bridge.topUpCollateral(positionId, 1e8);
+        cbtc.transfer(lender, 1); // user->user blocked even if borrower had any
     }
 }

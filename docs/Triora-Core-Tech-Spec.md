@@ -12,6 +12,18 @@
 
 ---
 
+> ## ⚠️ AMENDMENT (2026-06-29) — Core is now MODEL A. See `ADR-0001-no-real-funds-in-contracts.md`.
+> A **hard invariant** now governs the Core: **real assets (BTC, ETH, USDC) never touch any contract.**
+> The protocol is a pure ledger of accounting tokens (cBTC, cUSDC); real USDC moves exactly once,
+> directly custody→custody, OFF-CHAIN under AMINA's mandatory co-signature. This **supersedes the
+> Model-B (`CollateralBridge` over Morpho) decision** recorded below — wherever this spec describes
+> Model B (notably **S0.2 D-1/D-2/D-3, S6 CollateralBridge, S7 Morpho integration**), treat it as the
+> **OPTIONAL on-chain-liquidity connector**, NOT the Core. **Core = Model A:** a `LendingEngine`
+> settlement-instruction state machine over cBTC + a new `cUSDC` reserve token, with a
+> `SettlementAcker` consuming dual-signed (custodian + AMINA) funding/repayment acks; real settlement
+> is off-chain. The custody-tokenization safety spine (S1–S5 secure-mint/attestations/pledge-binding,
+> S8 liquidation/release-vouchers) is unchanged and still mandatory.
+
 ## S0. Foundations (read this first — it is the contract every later section obeys)
 
 ### S0.1 What Triora Core is

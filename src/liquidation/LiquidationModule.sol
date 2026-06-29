@@ -8,7 +8,7 @@ import {Roles} from "../libraries/Roles.sol";
 import {Errors} from "../libraries/Errors.sol";
 import {Types} from "../libraries/Types.sol";
 import {TrioraMath} from "../libraries/TrioraMath.sol";
-import {CollateralBridge} from "../engine/CollateralBridge.sol";
+import {LendingEngine} from "../engine/LendingEngine.sol";
 import {RiskConfig} from "../config/RiskConfig.sol";
 
 /// @title LiquidationModule
@@ -21,7 +21,7 @@ contract LiquidationModule is TrioraAccess, EIP712 {
     );
     uint64 public constant MAX_REPORT_SKEW = 5 minutes;
 
-    CollateralBridge public immutable bridge;
+    LendingEngine public immutable bridge;
     RiskConfig public immutable riskConfig;
     bytes32 public immutable marketId;
     address public oracleSigner;
@@ -50,7 +50,7 @@ contract LiquidationModule is TrioraAccess, EIP712 {
         if (bridge_ == address(0) || riskConfig_ == address(0) || oracleSigner_ == address(0)) {
             revert Errors.ZeroAddress();
         }
-        bridge = CollateralBridge(bridge_);
+        bridge = LendingEngine(bridge_);
         riskConfig = RiskConfig(riskConfig_);
         marketId = marketId_;
         oracleSigner = oracleSigner_;

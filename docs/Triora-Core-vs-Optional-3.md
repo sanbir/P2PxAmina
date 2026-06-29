@@ -11,6 +11,14 @@
 > **Note:** This document was written *before* reading `Triora-Core-vs-Optional.md`.
 > The comparison against that document is appended at the end (Part 7).
 
+> **⚠️ AMENDMENT (2026-06-29):** The product owner has made it an **absolute requirement** that real
+> assets never touch any contract. This **reverses the Part 1 ruling**: the Core loan rail is now
+> **Model A (pure tri-party settlement)**, and **Model B (the `CollateralBridge` over Morpho) is
+> demoted to the OPTIONAL on-chain-liquidity connector.** Real USDC stays in the lender's custody and
+> moves once, directly custody→custody, under AMINA co-signature; on-chain Triora holds only
+> accounting tokens. See `ADR-0001-no-real-funds-in-contracts.md` (authoritative). The safety-spine
+> reasoning in Parts 2–7 stands unchanged; only the loan-rail choice flips.
+
 ---
 
 ## Part 0 — What "Core" means here (the decision rule)

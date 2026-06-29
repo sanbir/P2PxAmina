@@ -65,7 +65,7 @@ contract PermissionedCollateralToken is ERC20, TrioraAccess, IPermissionedCollat
     /// @inheritdoc IPermissionedCollateralToken
     function mintForPledge(address to, bytes32 pledgeId, uint256 amount) external restricted(Roles.ISSUER_MINTER) {
         if (amount == 0) revert Errors.ZeroAmount();
-        if (!isProtocol[to]) revert Errors.TransferRestricted(address(0), to); // cBTC only ever minted to protocol
+        // Model A: cBTC is minted to the borrower (their collateral claim); they post it to a deal.
         reserveGuard.checkMint(address(this), amount); // SECURE-MINT (fail-closed)
         pledgeRegistry.recordMint(pledgeId, amount); // pledge-bound (reverts if minted>pledged)
         _mint(to, amount);
@@ -82,23 +82,19 @@ contract PermissionedCollateralToken is ERC20, TrioraAccess, IPermissionedCollat
         emit BurnedForRelease(from, pledgeId, amount, voucherId);
     }
 
-    /// @dev Transfer restriction (Tech Spec S4): cBTC circulates ONLY among allowlisted protocol
-    ///      addresses (bridge, protocol adapter, the isolated market). A normal transfer requires BOTH
-    ///      `from` and `to` to be protocol — checking both sides is the point (one-sided checks are the bug).
-    ///      Mint: `to` must be protocol. Burn: `from` must be protocol. Honors pause/freeze.
+    /// @dev Transfer restriction (Model A, Tech Spec S4): cBTC is a restricted accounting claim held by
+    ///      the borrower and the protocol (engine). A normal transfer is allowed only if **at least one
+    ///      side is a protocol address** (engine/vault) — so a counterparty can post collateral to the
+    ///      engine and receive it back, but **user↔user transfers are blocked** (neither side protocol).
+    ///      Mint (issuer → borrower) and burn (engine) are allowed. Honors pause/freeze.
     function _update(address from, address to, uint256 value) internal override {
         if (paused) revert Errors.Paused();
         bool isMint = from == address(0);
         bool isBurn = to == address(0);
         if (!isMint && frozen[from]) revert Errors.TransferRestricted(from, to);
         if (!isBurn && frozen[to]) revert Errors.TransferRestricted(from, to);
-
-        if (isMint) {
-            if (!isProtocol[to]) revert Errors.TransferRestricted(from, to);
-        } else if (isBurn) {
-            if (!isProtocol[from]) revert Errors.TransferRestricted(from, to);
-        } else {
-            if (!isProtocol[from] || !isProtocol[to]) revert Errors.TransferRestricted(from, to);
+        if (!isMint && !isBurn) {
+            if (!isProtocol[from] && !isProtocol[to]) revert Errors.TransferRestricted(from, to);
         }
         super._update(from, to, value);
     }

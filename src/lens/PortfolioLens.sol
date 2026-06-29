@@ -2,13 +2,13 @@
 pragma solidity 0.8.28;
 
 import {Types} from "../libraries/Types.sol";
-import {CollateralBridge} from "../engine/CollateralBridge.sol";
+import {LendingEngine} from "../engine/LendingEngine.sol";
 import {IPledgeRegistry} from "../interfaces/ITriora.sol";
 
 /// @title PortfolioLens
 /// @notice Read-only aggregation for the UI / indexer (Tech Spec S9). No privileges, no state.
 contract PortfolioLens {
-    CollateralBridge public immutable bridge;
+    LendingEngine public immutable bridge;
     IPledgeRegistry public immutable pledges;
 
     struct PositionView {
@@ -19,7 +19,7 @@ contract PortfolioLens {
     }
 
     constructor(address bridge_, address pledges_) {
-        bridge = CollateralBridge(bridge_);
+        bridge = LendingEngine(bridge_);
         pledges = IPledgeRegistry(pledges_);
     }
 

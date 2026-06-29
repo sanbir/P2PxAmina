@@ -10,44 +10,45 @@ import {Errors} from "../libraries/Errors.sol";
 import {Types} from "../libraries/Types.sol";
 import {TrioraMath} from "../libraries/TrioraMath.sol";
 import {
-    IProtocolAdapter,
     IOracleAdapter,
     IReleaseAuthorizer,
     ISettlementRouter,
     IPermissionedCollateralToken,
-    IPledgeRegistry
+    IReserveToken,
+    IPledgeRegistry,
+    IReserveRegistry
 } from "../interfaces/ITriora.sol";
 import {KYBGateway} from "../identity/KYBGateway.sol";
 import {RiskConfig} from "../config/RiskConfig.sol";
 import {PositionRegistry} from "../registry/PositionRegistry.sol";
 
-/// @title CollateralBridge
-/// @notice The Triora Core lending engine (Tech Spec S6). It owns the isolated Morpho position via the
-///         {MorphoAdapter}, keeps a per-borrower sub-ledger (Morpho sees only one aggregate position),
-///         and orchestrates the full lifecycle: open (mint→supply cBTC→borrow USDC to borrower),
-///         accrue (fixed APR), repay→release, top-up, and the AMINA-operated liquidation path.
-/// @dev Real BTC never enters here; the bridge holds only cBTC accounting tokens in-flight to Morpho.
-contract CollateralBridge is TrioraAccess, ReentrancyGuard {
+/// @title LendingEngine (Model A — pure tri-party ledger)
+/// @notice Triora Core engine (ADR-0001). It NEVER holds or moves real BTC/USDC — it operates ONLY the
+///         restricted accounting tokens cBTC + cUSDC and emits settlement instructions. Real USDC moves
+///         ONCE, directly lender-custody → borrower-custody, OFF-CHAIN under AMINA co-signature; a
+///         dual-signed ack (via {SettlementAcker}) drives the deal to Active. Repayment + collateral
+///         release + liquidation run as signed instructions/acks + state-derived release vouchers.
+contract LendingEngine is TrioraAccess, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // wiring (one-shot)
     KYBGateway public kyb;
     IPledgeRegistry public pledges;
+    IReserveRegistry public reserves;
     IPermissionedCollateralToken public cbtc;
     IERC20 public cbtcErc;
-    IProtocolAdapter public adapter;
+    IReserveToken public cusdc;
+    IERC20 public cusdcErc;
     IOracleAdapter public oracle;
     IReleaseAuthorizer public releaseAuth;
     ISettlementRouter public router;
     RiskConfig public riskConfig;
     PositionRegistry public positions;
+    address public acker; // the only caller of confirmFunding/confirmRepayment
     bytes32 public marketId;
-    IERC20 public usdc;
-    address public aminaTreasury; // funds liquidation repay of Morpho debt
-    address public aminaDesk; // destination of seized collateral release
+    address public aminaDesk; // destination of seized collateral release (off-chain custody)
     bool private _wired;
 
-    // sub-ledger
     mapping(bytes32 => Types.Position) private _position;
     mapping(bytes32 => bytes32) public voucherPrimary;
     mapping(bytes32 => bytes32) public voucherSurplus;
@@ -57,38 +58,43 @@ contract CollateralBridge is TrioraAccess, ReentrancyGuard {
     uint256 public marketDebt;
     uint256 private _nonce;
 
-    event PositionOpened(bytes32 indexed positionId, address indexed borrower, uint256 collateral, uint256 principal);
-    event Repaid(bytes32 indexed positionId, uint256 amount, uint256 outstanding);
-    event ReleasePending(bytes32 indexed positionId, bytes32 voucherId);
-    event Closed(bytes32 indexed positionId);
-    event ToppedUp(bytes32 indexed positionId, uint256 amount, uint256 newCollateral);
-    event Warned(bytes32 indexed positionId, uint64 cureDeadline);
-    event LiquidationPendingSet(bytes32 indexed positionId, uint64 cureDeadline);
-    event LiquidationCancelled(bytes32 indexed positionId);
-    event LiquidationExecuted(bytes32 indexed positionId, uint256 seized, uint256 surplus, bool defaulted);
-    event Liquidated(bytes32 indexed positionId);
+    event PositionOpened(
+        bytes32 indexed id, address indexed lender, address indexed borrower, uint256 collateral, uint256 principal
+    );
+    event FundingInstruction(bytes32 indexed id, address lender, address borrower, uint256 principalUsdc);
+    event Funded(bytes32 indexed id, bytes32 settlementRef);
+    event Cancelled(bytes32 indexed id);
+    event RepaymentRequested(bytes32 indexed id, uint256 quote);
+    event RepaymentConfirmed(bytes32 indexed id, bytes32 settlementRef, bytes32 voucherId);
+    event Closed(bytes32 indexed id);
+    event Warned(bytes32 indexed id, uint64 cureDeadline);
+    event LiquidationPendingSet(bytes32 indexed id, uint64 cureDeadline);
+    event LiquidationCancelled(bytes32 indexed id);
+    event LiquidationExecuted(bytes32 indexed id, uint256 seized, uint256 surplus, bool defaulted);
+    event Liquidated(bytes32 indexed id);
 
-    constructor(address roleManager_, address usdc_, address aminaTreasury_, address aminaDesk_)
-        TrioraAccess(roleManager_)
-    {
-        if (usdc_ == address(0) || aminaTreasury_ == address(0) || aminaDesk_ == address(0)) {
-            revert Errors.ZeroAddress();
-        }
-        usdc = IERC20(usdc_);
-        aminaTreasury = aminaTreasury_;
+    modifier onlyAcker() {
+        if (msg.sender != acker) revert Errors.NotAuthorized(Roles.SETTLEMENT, msg.sender);
+        _;
+    }
+
+    constructor(address roleManager_, address aminaDesk_) TrioraAccess(roleManager_) {
+        if (aminaDesk_ == address(0)) revert Errors.ZeroAddress();
         aminaDesk = aminaDesk_;
     }
 
     struct Wiring {
         address kyb;
         address pledges;
+        address reserves;
         address cbtc;
-        address adapter;
+        address cusdc;
         address oracle;
         address releaseAuth;
         address router;
         address riskConfig;
         address positions;
+        address acker;
         bytes32 marketId;
     }
 
@@ -96,29 +102,33 @@ contract CollateralBridge is TrioraAccess, ReentrancyGuard {
         if (_wired) revert Errors.AlreadySet();
         kyb = KYBGateway(w.kyb);
         pledges = IPledgeRegistry(w.pledges);
+        reserves = IReserveRegistry(w.reserves);
         cbtc = IPermissionedCollateralToken(w.cbtc);
         cbtcErc = IERC20(w.cbtc);
-        adapter = IProtocolAdapter(w.adapter);
+        cusdc = IReserveToken(w.cusdc);
+        cusdcErc = IERC20(w.cusdc);
         oracle = IOracleAdapter(w.oracle);
         releaseAuth = IReleaseAuthorizer(w.releaseAuth);
         router = ISettlementRouter(w.router);
         riskConfig = RiskConfig(w.riskConfig);
         positions = PositionRegistry(w.positions);
+        acker = w.acker;
         marketId = w.marketId;
         _wired = true;
     }
 
-    // ── lifecycle ──────────────────────────────────────────────────────────────
-
-    /// @notice AMINA (ALLOCATOR) opens a borrow position for a KYB'd borrower against a minted pledge.
-    function openPosition(
+    // ── open: match a lender + borrower; lock accounting tokens; instruct off-chain settlement ──
+    function openMatchedDeal(
+        address lender,
         address borrower,
         bytes32 pledgeId,
+        bytes32 reserveId,
         uint256 principalUsdc,
         uint32 rateBps,
         uint64 maturityTs,
         bytes32 legalTermsHash
     ) external restricted(Roles.ALLOCATOR) whenNotPaused nonReentrant returns (bytes32 positionId) {
+        kyb.requireApproved(lender);
         kyb.requireApproved(borrower);
         Types.MarketParams memory mp = riskConfig.getParams(marketId);
         if (!mp.active) revert Errors.MarketInactive();
@@ -131,51 +141,55 @@ contract CollateralBridge is TrioraAccess, ReentrancyGuard {
         if (pl.owner != borrower || pl.status != Types.PledgeStatus.Minted) {
             revert Errors.BadPledgeStatus(uint8(pl.status));
         }
-        uint256 collateral = pledges.freeAmount(pledgeId);
-        if (collateral == 0) revert Errors.ZeroAmount();
-
-        // LTV check (value in 1e8 USD → USDC 1e6)
-        uint256 collUsd = oracle.collateralValueUsd(collateral);
-        uint256 maxBorrowUsdc = (collUsd * mp.ltvBps / TrioraMath.BPS) / 1e2;
-        if (principalUsdc == 0 || principalUsdc > maxBorrowUsdc) {
-            revert Errors.LtvExceeded(principalUsdc, maxBorrowUsdc);
+        Types.Reserve memory rv = reserves.getReserve(reserveId);
+        if (rv.owner != lender || rv.status != Types.ReserveStatus.Available) {
+            revert Errors.BadPledgeStatus(uint8(rv.status));
         }
 
-        // caps
+        uint256 collateral = pledges.freeAmount(pledgeId);
+        if (collateral == 0) revert Errors.ZeroAmount();
+        if (principalUsdc == 0 || principalUsdc > reserves.availableAmount(reserveId)) revert Errors.ZeroAmount();
+
+        uint256 collUsd = oracle.collateralValueUsd(collateral); // 1e8
+        uint256 maxBorrowUsdc = (collUsd * mp.ltvBps / TrioraMath.BPS) / 1e2;
+        if (principalUsdc > maxBorrowUsdc) revert Errors.LtvExceeded(principalUsdc, maxBorrowUsdc);
+
         if (borrowerDebt[borrower] + principalUsdc > mp.perBorrowerCapUsdc) revert Errors.CapExceeded();
         if (marketDebt + principalUsdc > mp.marketCapUsdc) revert Errors.CapExceeded();
 
-        positionId = keccak256(abi.encode(block.chainid, address(this), borrower, pledgeId, ++_nonce));
+        positionId = keccak256(abi.encode(block.chainid, address(this), lender, borrower, pledgeId, ++_nonce));
 
         pledges.lockForDeal(pledgeId, positionId, collateral);
-
-        // supply cBTC collateral to Morpho, then borrow USDC straight to the borrower
-        cbtcErc.forceApprove(address(adapter), collateral);
-        adapter.supplyCollateral(collateral);
-        adapter.borrow(principalUsdc, borrower);
+        reserves.lockForDeal(reserveId, positionId, principalUsdc);
+        // pull the accounting tokens into the engine (NOT real funds)
+        cbtcErc.safeTransferFrom(borrower, address(this), collateral);
+        cusdcErc.safeTransferFrom(lender, address(this), principalUsdc);
 
         _position[positionId] = Types.Position({
+            lender: lender,
             borrower: borrower,
             pledgeId: pledgeId,
+            reserveId: reserveId,
             collateral: collateral,
             principal: principalUsdc,
             outstanding: principalUsdc,
             rateBps: rateBps,
-            startTs: uint64(block.timestamp),
+            startTs: 0,
             maturityTs: maturityTs,
-            lastAccrueTs: uint64(block.timestamp),
-            state: Types.PositionState.Active,
+            lastAccrueTs: 0,
+            state: Types.PositionState.SettlementPending,
             paramVersion: riskConfig.version(marketId),
             cureDeadline: 0
         });
         positions.record(
             positionId,
             PositionRegistry.Terms({
+                lender: lender,
                 borrower: borrower,
                 pledgeId: pledgeId,
+                reserveId: reserveId,
                 principal: principalUsdc,
                 rateBps: rateBps,
-                startTs: uint64(block.timestamp),
                 maturityTs: maturityTs,
                 marketId: marketId,
                 legalTermsHash: legalTermsHash
@@ -184,80 +198,41 @@ contract CollateralBridge is TrioraAccess, ReentrancyGuard {
         borrowerDebt[borrower] += principalUsdc;
         marketDebt += principalUsdc;
 
-        router.emitInstruction("POSITION_OPENED", positionId, bytes32(0), "");
-        emit PositionOpened(positionId, borrower, collateral, principalUsdc);
+        // instruct AMINA/custody to move real USDC ONCE, lender custody -> borrower custody
+        router.emitInstruction("FUNDING_INSTRUCTION", positionId, bytes32(0), "");
+        emit FundingInstruction(positionId, lender, borrower, principalUsdc);
+        emit PositionOpened(positionId, lender, borrower, collateral, principalUsdc);
     }
 
-    /// @notice Repay (borrower or AMINA). Full repayment withdraws collateral and issues a borrower voucher.
-    function repay(bytes32 positionId, uint256 amount) external whenNotPaused nonReentrant {
+    /// @notice Driven by {SettlementAcker} after a dual-signed FundingAck: the real USDC moved in custody.
+    function confirmFunding(bytes32 positionId, bytes32 settlementRef) external onlyAcker nonReentrant {
         Types.Position storage p = _position[positionId];
-        if (
-            p.state != Types.PositionState.Active && p.state != Types.PositionState.Warned
-                && p.state != Types.PositionState.RepaymentPending
-        ) revert Errors.BadPositionState(uint8(p.state));
-        if (msg.sender != p.borrower && !_hasRole(Roles.ALLOCATOR, msg.sender)) {
-            revert Errors.NotAuthorized(Roles.ALLOCATOR, msg.sender);
-        }
-
-        adapter.accrue();
-        _accrue(positionId);
-
-        uint256 pay = amount > p.outstanding ? p.outstanding : amount;
-        if (pay == 0) revert Errors.ZeroAmount();
-
-        usdc.safeTransferFrom(msg.sender, address(this), pay);
-        usdc.forceApprove(address(adapter), pay);
-        adapter.repay(pay);
-
-        p.outstanding -= pay;
-        borrowerDebt[p.borrower] -= pay;
-        marketDebt -= pay;
-
-        if (p.outstanding == 0) {
-            adapter.withdrawCollateral(p.collateral, address(this));
-            bytes32 v = releaseAuth.issueRepaymentRelease(positionId, p.pledgeId, p.borrower, p.collateral);
-            voucherPrimary[positionId] = v;
-            pledges.markReleasePending(p.pledgeId);
-            p.state = Types.PositionState.ReleasePending;
-            router.emitInstruction("RELEASE_VOUCHER", positionId, v, "");
-            emit ReleasePending(positionId, v);
-        } else {
-            p.state = Types.PositionState.Active; // partial repay un-warns
-        }
-        emit Repaid(positionId, pay, p.outstanding);
+        if (p.state != Types.PositionState.SettlementPending) revert Errors.BadPositionState(uint8(p.state));
+        p.state = Types.PositionState.Active;
+        p.startTs = uint64(block.timestamp);
+        p.lastAccrueTs = uint64(block.timestamp);
+        // the lender's reservation is now deployed: burn the locked cUSDC.
+        reserves.markFunded(p.reserveId, p.principal);
+        cusdc.burnLocked(address(this), p.principal);
+        router.emitInstruction("FUNDING_CONFIRMED", positionId, settlementRef, "");
+        emit Funded(positionId, settlementRef);
     }
 
-    /// @notice Custody listener acknowledges the off-chain BTC release; burns cBTC and finalizes.
-    function confirmRelease(bytes32 positionId) external restricted(Roles.SETTLEMENT) nonReentrant {
+    /// @notice Unwind a deal that never funded: return both accounting tokens to their owners.
+    function cancelUnfunded(bytes32 positionId) external restricted(Roles.ALLOCATOR) nonReentrant {
         Types.Position storage p = _position[positionId];
-        if (p.state == Types.PositionState.ReleasePending) {
-            bytes32 v = voucherPrimary[positionId];
-            cbtc.burnForRelease(address(this), p.pledgeId, p.collateral, v);
-            pledges.markReleased(p.pledgeId, p.collateral);
-            p.state = Types.PositionState.Closed;
-            router.emitInstruction("RELEASE_ACK", positionId, v, "");
-            emit Closed(positionId);
-        } else if (p.state == Types.PositionState.LiquidationPending && liqExecuted[positionId]) {
-            bytes32 v1 = voucherPrimary[positionId];
-            uint256 seized = releaseAuth.getVoucher(v1).amount;
-            cbtc.burnForRelease(address(this), p.pledgeId, seized, v1);
-            uint256 surplus;
-            bytes32 v2 = voucherSurplus[positionId];
-            if (v2 != bytes32(0)) {
-                surplus = releaseAuth.getVoucher(v2).amount;
-                cbtc.burnForRelease(address(this), p.pledgeId, surplus, v2);
-            }
-            pledges.markLiquidated(p.pledgeId, p.collateral);
-            p.state = liqDefaulted[positionId] ? Types.PositionState.Defaulted : Types.PositionState.Liquidated;
-            router.emitInstruction("LIQUIDATION_ACK", positionId, v1, "");
-            emit Liquidated(positionId);
-        } else {
-            revert Errors.BadPositionState(uint8(p.state));
-        }
+        if (p.state != Types.PositionState.SettlementPending) revert Errors.BadPositionState(uint8(p.state));
+        pledges.unlockFromDeal(p.pledgeId, p.collateral);
+        reserves.unlockFromDeal(p.reserveId, p.principal);
+        cbtcErc.safeTransfer(p.borrower, p.collateral);
+        cusdcErc.safeTransfer(p.lender, p.principal);
+        borrowerDebt[p.borrower] -= p.principal;
+        marketDebt -= p.principal;
+        p.state = Types.PositionState.Cancelled;
+        emit Cancelled(positionId);
     }
 
-    /// @notice Borrower tops up collateral from the SAME pledge's free amount (margin-call response).
-    function topUpCollateral(bytes32 positionId, uint256 amount) external whenNotPaused nonReentrant {
+    function requestRepayment(bytes32 positionId) external whenNotPaused {
         Types.Position storage p = _position[positionId];
         if (p.state != Types.PositionState.Active && p.state != Types.PositionState.Warned) {
             revert Errors.BadPositionState(uint8(p.state));
@@ -265,23 +240,56 @@ contract CollateralBridge is TrioraAccess, ReentrancyGuard {
         if (msg.sender != p.borrower && !_hasRole(Roles.ALLOCATOR, msg.sender)) {
             revert Errors.NotAuthorized(Roles.ALLOCATOR, msg.sender);
         }
-        if (amount == 0 || amount > pledges.freeAmount(p.pledgeId)) revert Errors.PledgeNotFree(p.pledgeId);
-        pledges.lockForDeal(p.pledgeId, positionId, amount); // adds to encumbrance (same dealId)
-        cbtcErc.forceApprove(address(adapter), amount);
-        adapter.supplyCollateral(amount);
-        p.collateral += amount;
-        if (
-            p.state == Types.PositionState.Warned
-                && _ltvBps(positionId) < riskConfig.getParams(marketId).aminaWarningBps
-        ) {
-            p.state = Types.PositionState.Active;
-            p.cureDeadline = 0;
+        _accrue(positionId);
+        p.state = Types.PositionState.RepaymentPending;
+        router.emitInstruction("REPAYMENT_INSTRUCTION", positionId, bytes32(0), "");
+        emit RepaymentRequested(positionId, p.outstanding);
+    }
+
+    /// @notice Driven by {SettlementAcker} after a dual-signed RepaymentAck: borrower repaid the lender
+    ///         off-chain. Issue the collateral-release voucher (destination = borrower).
+    function confirmRepayment(bytes32 positionId, bytes32 settlementRef) external onlyAcker nonReentrant {
+        Types.Position storage p = _position[positionId];
+        if (p.state != Types.PositionState.RepaymentPending && p.state != Types.PositionState.Active) {
+            revert Errors.BadPositionState(uint8(p.state));
         }
-        emit ToppedUp(positionId, amount, p.collateral);
+        _accrue(positionId);
+        p.outstanding = 0;
+        borrowerDebt[p.borrower] -= 0; // debt already tracked; principal cleared logically
+        marketDebt = marketDebt >= p.principal ? marketDebt - p.principal : 0;
+        borrowerDebt[p.borrower] = borrowerDebt[p.borrower] >= p.principal ? borrowerDebt[p.borrower] - p.principal : 0;
+        reserves.markReturned(p.reserveId);
+        bytes32 v = releaseAuth.issueRepaymentRelease(positionId, p.pledgeId, p.borrower, p.collateral);
+        voucherPrimary[positionId] = v;
+        pledges.markReleasePending(p.pledgeId);
+        p.state = Types.PositionState.ReleasePending;
+        emit RepaymentConfirmed(positionId, settlementRef, v);
+    }
+
+    /// @notice Custody listener acknowledges the off-chain BTC release; burns cBTC and finalizes.
+    function confirmRelease(bytes32 positionId) external restricted(Roles.SETTLEMENT) nonReentrant {
+        Types.Position storage p = _position[positionId];
+        if (p.state == Types.PositionState.ReleasePending) {
+            cbtc.burnForRelease(address(this), p.pledgeId, p.collateral, voucherPrimary[positionId]);
+            pledges.markReleased(p.pledgeId, p.collateral);
+            p.state = Types.PositionState.Closed;
+            emit Closed(positionId);
+        } else if (p.state == Types.PositionState.LiquidationPending && liqExecuted[positionId]) {
+            bytes32 v1 = voucherPrimary[positionId];
+            cbtc.burnForRelease(address(this), p.pledgeId, releaseAuth.getVoucher(v1).amount, v1);
+            bytes32 v2 = voucherSurplus[positionId];
+            if (v2 != bytes32(0)) {
+                cbtc.burnForRelease(address(this), p.pledgeId, releaseAuth.getVoucher(v2).amount, v2);
+            }
+            pledges.markLiquidated(p.pledgeId, p.collateral);
+            p.state = liqDefaulted[positionId] ? Types.PositionState.Defaulted : Types.PositionState.Liquidated;
+            emit Liquidated(positionId);
+        } else {
+            revert Errors.BadPositionState(uint8(p.state));
+        }
     }
 
     // ── liquidation hooks (LiquidationModule only) ──────────────────────────────
-
     function setWarned(bytes32 positionId, uint64 cureDeadline) external restricted(Roles.LIQUIDATION_MODULE) {
         Types.Position storage p = _position[positionId];
         if (p.state != Types.PositionState.Active) revert Errors.BadPositionState(uint8(p.state));
@@ -314,38 +322,29 @@ contract CollateralBridge is TrioraAccess, ReentrancyGuard {
         emit LiquidationCancelled(positionId);
     }
 
-    /// @notice Finalized by the module after the cure window. AMINA funds the Morpho repay; collateral
-    ///         is withdrawn; seized + surplus vouchers are issued (surplus → borrower).
+    /// @notice Seize cBTC for AMINA (debt+bonus+fee) and refund surplus cBTC to the borrower. NO real
+    ///         USDC moves on-chain — the lender is repaid off-chain from AMINA's sale of the released BTC.
     function executeLiquidation(bytes32 positionId) external restricted(Roles.LIQUIDATION_MODULE) nonReentrant {
         Types.Position storage p = _position[positionId];
         if (p.state != Types.PositionState.LiquidationPending || liqExecuted[positionId]) {
             revert Errors.BadPositionState(uint8(p.state));
         }
-        adapter.accrue();
         _accrue(positionId);
         Types.MarketParams memory mp = riskConfig.getParams(marketId);
+        uint256 debt = p.outstanding; // USDC (6 dec)
+        borrowerDebt[p.borrower] = borrowerDebt[p.borrower] >= p.principal ? borrowerDebt[p.borrower] - p.principal : 0;
+        marketDebt = marketDebt >= p.principal ? marketDebt - p.principal : 0;
 
-        uint256 debt = p.outstanding;
-        if (debt > 0) {
-            usdc.safeTransferFrom(aminaTreasury, address(this), debt);
-            usdc.forceApprove(address(adapter), debt);
-            adapter.repay(debt);
-            borrowerDebt[p.borrower] -= debt;
-            marketDebt -= debt;
-            p.outstanding = 0;
-        }
-        adapter.withdrawCollateral(p.collateral, address(this));
-
-        (uint256 price,) = oracle.getPrice(); // liquidation tolerates a stale feed (AMINA has off-chain data)
+        (uint256 price,) = oracle.getPrice(); // 1e8; liquidation tolerates a stale feed
         uint256 payoutUsdc = debt * (TrioraMath.BPS + mp.liquidationBonusBps + mp.aminaFeeBps) / TrioraMath.BPS;
-        // cBTC(8dec) for the payout USD value: value1e8 = payoutUsdc*1e2 ; amount8 = value1e8 * 1e8 / price1e8
+        // cBTC(8dec) covering the payout USD value: value1e8 = payoutUsdc*1e2 ; amount8 = value1e8 * 1e8 / price1e8
         uint256 seized = TrioraMath.mulDiv(payoutUsdc * 1e2, 1e8, price);
 
         uint256 surplus;
         bool defaulted;
         if (seized >= p.collateral) {
             seized = p.collateral;
-            defaulted = true; // proceeds < amount owed to AMINA → shortfall booked off-chain
+            defaulted = true;
         } else {
             surplus = p.collateral - seized;
         }
@@ -353,8 +352,7 @@ contract CollateralBridge is TrioraAccess, ReentrancyGuard {
         bytes32 v1 = releaseAuth.issueLiquidationRelease(positionId, p.pledgeId, aminaDesk, seized);
         voucherPrimary[positionId] = v1;
         if (surplus > 0) {
-            bytes32 v2 = releaseAuth.issueSurplusRelease(positionId, p.pledgeId, p.borrower, surplus);
-            voucherSurplus[positionId] = v2;
+            voucherSurplus[positionId] = releaseAuth.issueSurplusRelease(positionId, p.pledgeId, p.borrower, surplus);
         }
         liqExecuted[positionId] = true;
         liqDefaulted[positionId] = defaulted;
@@ -362,8 +360,7 @@ contract CollateralBridge is TrioraAccess, ReentrancyGuard {
         emit LiquidationExecuted(positionId, seized, surplus, defaulted);
     }
 
-    // ── views ──────────────────────────────────────────────────────────────────
-
+    // ── views ───────────────────────────────────────────────────────────────────
     function getPosition(bytes32 positionId) external view returns (Types.Position memory) {
         return _position[positionId];
     }
@@ -383,18 +380,14 @@ contract CollateralBridge is TrioraAccess, ReentrancyGuard {
         return _ltvBps(positionId);
     }
 
-    // ── internals ────────────────────────────────────────────────────────────────
-
+    // ── internals ─────────────────────────────────────────────────────────────────
     function _accrue(bytes32 positionId) internal {
         Types.Position storage p = _position[positionId];
+        if (p.startTs == 0) return; // not funded yet → no interest
         uint64 end = uint64(block.timestamp) < p.maturityTs ? uint64(block.timestamp) : p.maturityTs;
         if (end > p.lastAccrueTs) {
             uint256 add = TrioraMath.linearInterest(p.principal, p.rateBps, end - p.lastAccrueTs);
-            if (add > 0) {
-                p.outstanding += add;
-                borrowerDebt[p.borrower] += add;
-                marketDebt += add;
-            }
+            if (add > 0) p.outstanding += add;
             p.lastAccrueTs = end;
         }
     }
@@ -403,7 +396,7 @@ contract CollateralBridge is TrioraAccess, ReentrancyGuard {
         Types.Position storage p = _position[positionId];
         uint256 collUsd = oracle.collateralValueUsd(p.collateral); // 1e8
         if (collUsd == 0) return type(uint256).max;
-        uint256 debtUsd = currentOutstanding(positionId) * 1e2; // 1e6 → 1e8
+        uint256 debtUsd = currentOutstanding(positionId) * 1e2;
         return debtUsd * TrioraMath.BPS / collUsd;
     }
 }

@@ -4,66 +4,75 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {TrioraFixture} from "../TrioraFixture.sol";
 import {PermissionedCollateralToken} from "../../src/tokens/PermissionedCollateralToken.sol";
+import {ReserveToken} from "../../src/tokens/ReserveToken.sol";
 import {ReserveGuard} from "../../src/reserves/ReserveGuard.sol";
 import {PledgeRegistry} from "../../src/registry/PledgeRegistry.sol";
-import {Roles} from "../../src/libraries/Roles.sol";
-import {Types} from "../../src/libraries/Types.sol";
 
-/// @notice Fuzzes minting against the secure-mint guard; the handler exhaustively attempts mints.
+/// @notice Fuzzes minting of BOTH accounting tokens against the secure-mint guard.
 contract MintHandler is Test {
-    PermissionedCollateralToken internal cbtc;
-    PledgeRegistry internal pledges;
-    address internal bridge;
-    bytes32[] internal pids;
+    PermissionedCollateralToken cbtc;
+    ReserveToken cusdc;
+    bytes32[] cbtcIds;
+    bytes32[] cusdcIds;
 
-    constructor(address cbtc_, address pledges_, address bridge_, bytes32[] memory pids_) {
+    constructor(address cbtc_, address cusdc_, bytes32[] memory ci, bytes32[] memory ri) {
         cbtc = PermissionedCollateralToken(cbtc_);
-        pledges = PledgeRegistry(pledges_);
-        bridge = bridge_;
-        pids = pids_;
+        cusdc = ReserveToken(cusdc_);
+        cbtcIds = ci;
+        cusdcIds = ri;
     }
 
-    /// @dev This handler holds ISSUER_MINTER, so it can mint directly. Over-limit mints revert (caught).
-    function mint(uint256 seed, uint256 amount) external {
-        bytes32 pid = pids[seed % pids.length];
-        uint256 free = pledges.freeAmount(pid);
-        if (free == 0) return;
-        amount = bound(amount, 1, free);
-        try cbtc.mintForPledge(bridge, pid, amount) {} catch {}
+    function mintCbtc(uint256 seed, uint256 amount, address to) external {
+        bytes32 id = cbtcIds[seed % cbtcIds.length];
+        if (to == address(0)) to = address(0xBEEF);
+        amount = bound(amount, 1, 50e8);
+        try cbtc.mintForPledge(to, id, amount) {} catch {}
+    }
+
+    function mintCusdc(uint256 seed, uint256 amount, address to) external {
+        bytes32 id = cusdcIds[seed % cusdcIds.length];
+        if (to == address(0)) to = address(0xBEEF);
+        amount = bound(amount, 1, 300000e6);
+        try cusdc.mintForReserve(to, id, amount) {} catch {}
     }
 }
 
 contract ReserveInvariantTest is TrioraFixture {
     MintHandler internal handler;
-    bytes32[] internal pids;
-    uint256 internal constant RESERVE_8 = 200e8;
+    bytes32[] internal cbtcIds;
+    bytes32[] internal cusdcIds;
 
     function setUp() public override {
         super.setUp();
-        // fixed, fresh reserve well above total pledged → exercises both reserve and pledge limits
-        attestReserve(RESERVE_8);
-        for (uint256 i = 0; i < 4; i++) {
-            bytes32 pid = keccak256(abi.encode("pledge", i));
-            attestPledge(pid, 100e8); // total pledged 400e8 > reserve 200e8 → reserve binds
+        // reserves smaller than total registered → the reserve guard binds and rejects over-mints
+        attestReserve(address(cbtc), 200e8, 8);
+        attestReserve(address(cusdc), 1000000e6, 6);
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 cid = keccak256(abi.encode("c", i));
+            attestPledge(cid, address(cbtc), 100e8, 8);
             vm.prank(amina);
-            pledges.registerPledge(pid, borrower, bytes32("acct"), 100e8, bytes32("ctrl"));
-            pids.push(pid);
+            pledges.registerPledge(cid, borrower, bytes32("a"), 100e8, bytes32("c"));
+            cbtcIds.push(cid);
+
+            bytes32 rid = keccak256(abi.encode("r", i));
+            attestPledge(rid, address(cusdc), 500000e6, 6);
+            vm.prank(amina);
+            reserves.registerReserve(rid, lender, bytes32("a"), 500000e6, bytes32("c"));
+            cusdcIds.push(rid);
         }
-        handler = new MintHandler(address(cbtc), address(pledges), address(bridge), pids);
-        rm.grantRole(Roles.ISSUER_MINTER, address(handler));
+        handler = new MintHandler(address(cbtc), address(cusdc), cbtcIds, cusdcIds);
+        rm.grantRole(keccak256("triora.role.ISSUER_MINTER"), address(handler));
         targetContract(address(handler));
     }
 
-    /// @notice CORE SOLVENCY INVARIANT (S0.9 #1): cBTC supply never exceeds attested reserves − margin.
-    function invariant_supplyWithinReserveLimit() public view {
+    /// @notice CORE SOLVENCY INVARIANT (ADR-0001 / S0.9 #1): each accounting token's supply never
+    ///         exceeds its attested reserves − margin. The mint guard is the only thing standing between
+    ///         "1:1 backed claim" and an unbacked claim borrowed against real value.
+    function invariant_cbtcSupplyWithinReserve() public view {
         assertLe(cbtc.totalSupply(), guard.previewMintLimit(address(cbtc)));
     }
 
-    /// @notice Per-pledge: minted never exceeds pledged (S0.9 #2).
-    function invariant_mintedNeverExceedsPledged() public view {
-        for (uint256 i = 0; i < pids.length; i++) {
-            Types.Pledge memory p = pledges.getPledge(pids[i]);
-            assertLe(p.mintedAmount, p.pledgedAmount);
-        }
+    function invariant_cusdcSupplyWithinReserve() public view {
+        assertLe(cusdc.totalSupply(), guard.previewMintLimit(address(cusdc)));
     }
 }

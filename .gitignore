@@ -15,3 +15,5 @@ foundry.lock
 
 # Logs
 test_logs/
+
+deployments/

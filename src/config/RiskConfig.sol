@@ -43,10 +43,10 @@ contract RiskConfig is TrioraAccess {
         return _archive[marketId][ver];
     }
 
-    /// @dev ladder: ltv < warning < aminaLiquidation < morphoLltv <= 100% (S0.9 #6).
+    /// @dev Model A ladder: ltv < warning < aminaLiquidation <= 100%.
     function _validate(Types.MarketParams calldata p) internal pure {
         if (!(p.ltvBps < p.aminaWarningBps && p.aminaWarningBps < p.aminaLiquidationBps
-                    && p.aminaLiquidationBps < p.morphoLltvBps && p.morphoLltvBps <= 10000)) revert Errors.BadConfig();
+                    && p.aminaLiquidationBps <= 10000)) revert Errors.BadConfig();
         if (p.ltvBps == 0 || p.maxRateBps == 0 || p.maxMaturity == 0) revert Errors.BadConfig();
         if (p.liquidationBonusBps > 2000 || p.aminaFeeBps > 2000) revert Errors.BadConfig();
         if (p.cureWindowSecs == 0) revert Errors.BadConfig();

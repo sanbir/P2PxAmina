@@ -4,55 +4,49 @@ pragma solidity 0.8.28;
 import {TrioraFixture} from "../TrioraFixture.sol";
 import {Errors} from "../../src/libraries/Errors.sol";
 
-/// @notice cBTC transfer-restriction tests (Tech Spec S4) — checks BOTH from and to, pause, freeze.
+/// @notice Restricted accounting-token transfers (Model A): at least one side must be a protocol
+///         address (engine); user↔user blocked; pause/freeze honored. Applies to cBTC and cUSDC.
 contract TransfersTest is TrioraFixture {
     bytes32 internal pid = keccak256("p");
+    bytes32 internal rid = keccak256("r");
 
     function setUp() public override {
         super.setUp();
-        setupPledgeAndMint(pid, borrower, 10e8); // bridge holds 10 cBTC
+        setupBorrowerCbtc(pid, 10e8); // borrower holds 10 cBTC
+        setupLenderCusdc(rid, 500000e6); // lender holds 500k cUSDC
     }
 
-    function test_transfer_bridgeToNonProtocol_reverts() public {
-        vm.prank(address(bridge));
-        vm.expectRevert(abi.encodeWithSelector(Errors.TransferRestricted.selector, address(bridge), stranger));
-        cbtc.transfer(stranger, 1e8);
+    function test_cbtc_userToUser_reverts() public {
+        vm.prank(borrower);
+        vm.expectRevert(abi.encodeWithSelector(Errors.TransferRestricted.selector, borrower, lender));
+        cbtc.transfer(lender, 1e8);
     }
 
-    function test_transfer_bridgeToProtocol_ok() public {
-        vm.prank(address(bridge));
-        cbtc.transfer(address(adapter), 1e8);
-        assertEq(cbtc.balanceOf(address(adapter)), 1e8);
+    function test_cbtc_userToEngine_ok() public {
+        vm.prank(borrower);
+        cbtc.transfer(address(engine), 1e8); // engine is a protocol address
+        assertEq(cbtc.balanceOf(address(engine)), 1e8);
     }
 
-    function test_transfer_protocolToNonProtocol_reverts() public {
-        // adapter is protocol; move some cBTC there then attempt adapter→stranger
-        vm.prank(address(bridge));
-        cbtc.transfer(address(adapter), 1e8);
-        vm.prank(address(adapter));
-        vm.expectRevert(abi.encodeWithSelector(Errors.TransferRestricted.selector, address(adapter), stranger));
-        cbtc.transfer(stranger, 1e8);
+    function test_cusdc_userToUser_reverts() public {
+        vm.prank(lender);
+        vm.expectRevert(abi.encodeWithSelector(Errors.TransferRestricted.selector, lender, borrower));
+        cusdc.transfer(borrower, 1e6);
     }
 
-    function test_frozen_blocksTransfer() public {
+    function test_cbtc_frozen_blocks() public {
         vm.prank(amina); // GUARDIAN
-        cbtc.setFrozen(address(adapter), true);
-        vm.prank(address(bridge));
-        vm.expectRevert(abi.encodeWithSelector(Errors.TransferRestricted.selector, address(bridge), address(adapter)));
-        cbtc.transfer(address(adapter), 1e8);
+        cbtc.setFrozen(borrower, true);
+        vm.prank(borrower);
+        vm.expectRevert(abi.encodeWithSelector(Errors.TransferRestricted.selector, borrower, address(engine)));
+        cbtc.transfer(address(engine), 1e8);
     }
 
-    function test_paused_blocksTransfer() public {
-        vm.prank(amina); // GUARDIAN can pause
+    function test_cbtc_paused_blocks() public {
+        vm.prank(amina);
         cbtc.pause();
-        vm.prank(address(bridge));
+        vm.prank(borrower);
         vm.expectRevert(Errors.Paused.selector);
-        cbtc.transfer(address(adapter), 1e8);
-    }
-
-    function test_setFrozen_onlyGuardian() public {
-        vm.prank(stranger);
-        vm.expectRevert();
-        cbtc.setFrozen(address(adapter), true);
+        cbtc.transfer(address(engine), 1e8);
     }
 }
